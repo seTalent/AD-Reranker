@@ -3,29 +3,28 @@
 <h5 align="center">📅 Released on <strong>2025.08.01</strong> &nbsp;&nbsp;&nbsp; ⭐ Star us on GitHub for updates!</h5>
 
 ---
-
 ## 📚 Contents
 
-- [📝 Project Log](#1)
-- [⚡ Highlights](#2)
-- [🖼️ Overview](#3)
-- [📈 Performance](#4)
-- [🚀 QuickStart](#5)
-- [⚙️ Requirements](#6)
-- [📁 Data Preparation](#7)
-- [🧩 Data Extraction](#8)
-- [🔍 Retrieval](#9)
-- [🎯 Training](#10)
-- [🧪 Evaluation](#11)
-
+- [📝 Project Log](#project-log)
+- [⚡ Highlights](#highlights)
+- [🖼️ Overview](#overview)
+- [📈 Performance](#performance)
+- [🚀 QuickStart](#quickstart)
+- [⚙️ Requirements](#requirements)
+- [📁 Data Preparation](#data-preparation)
+- [🧩 Data Extraction](#data-extraction)
+- [🔍 Retrieval](#retrieval)
+- [🎯 Training](#training)
+- [🧪 Evaluation](#evaluation)
 ---
-<h2 id="1">📝 Project Log</h2>
+
+## 📝 Project Log
 
 + **[2025.08.01]** 📤 Initial codebase uploaded! 
 
 
 ---
-<h2 id="2">⚡ Highlights</h2>
+## ⚡ Highlights
 - **Un-supervised Answer-Driven Training:**  
   AD-Reranker uses the quality of generated answers as the training signal, eliminating the need for manual or LLM-generated ranking labels.
 
@@ -37,19 +36,19 @@
 
 
 ---
-<h2 id="3">🖼️ Overview</h2>
+## 🖼️ Overview
 <p align="center">
   <img src="assets/overview.png" width="80%">
 </p>
 
 ---
-<h2 id="4">📈 Performance</h2>
+## 📈 Performance
 <p align="center">
   <img src="assets/table.png" width="80%">
 </p>
 
 ---
-<h2 id="5">🚀 QuickStart</h2>
+## 🚀 QuickStart
 We provide LoRA checkpoints in the `ckpt/` directory. To use them, update `config/models/answer.yaml` as follows:
 
 ```yaml
@@ -65,7 +64,7 @@ result = model.quick_start(
     image_paths=["img1.png", "img2.png", "img3.png", "img4.png"]
 )
 ```
-<h2 id="6">⚙️ Requirements</h2>
+## ⚙️ Requirements
 ```bash
 conda create --name ad-reranker python=3.12
 conda activate ad-reranker
@@ -74,7 +73,7 @@ pip install -r requirements.txt
 # or run the install script (not all packages included)
 bash install.sh
 ```
-<h2 id="7">📁 Data Preparation</h2>
+## 📁 Data Preparation
 + **1.Create a data directory:**
 
 ```
@@ -85,7 +84,8 @@ cd data
 + **2.Download the [MP-DocVQA](https://rrc.cvc.uab.es/?ch=17) dataset.**
 
 + **3.Download additional benchmarks from [HuggingFace](https://huggingface.co/datasets) (temporarily, partically available in our GitHub repo)**
-<h2 id="8">🧩 Data Extraction</h2>
+## 🧩 Data Extraction
+
 ```bash
 python scripts/extract.py --config-name <dataset>  # mpdoc-vqa/mmlb/ldu/ptab/ptext/feta
 ```
@@ -93,7 +93,7 @@ python scripts/extract.py --config-name <dataset>  # mpdoc-vqa/mmlb/ldu/ptab/pte
  ⚠️ The MP-DOCVQA dataset already contains pre-segmented images, so separate image segmentation is not required.
 
 Extracted images will be saved to: ```tmp/<dataset>```
-<h2 id="9">🔍 Retrieval</h2>
+## 🔍 Retrieval
 
 + **Colpali**:
 
@@ -109,7 +109,7 @@ python build_index.py
 ```
 
 Results will be saved at: ```data/<dataset>/sample-with-retrieval-results.json``` and ```data/<dataset>/sample_visrag.json```.
-<h2 id="10">🎯 Training</h2>
+## 🎯 Training
 
 + 1.Set your OpenAI API key and select a model in `config/models/base.yaml`:
 
@@ -124,7 +124,7 @@ api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```python
 CUDA_VISIBLE_DEVICES=0,1 python scripts/grpo_train.py --config-name mpdoc
 ```
-<h2 id="11">🧪 Evaluation</h2>
+## 🧪 Evaluation
 
 + M3DocRAG
 
