@@ -1,6 +1,3 @@
-<p align="center">
-    <img src="https://z1.ax1x.com/2023/11/07/pil4sqH.png" width="150"/>
-</p>
 
 <h2 align="center"><a href="https://arxiv.org/abs/2311.10122">Good Ranks Follow Good Answers: Unsupervised Answer-Driven Reranking for Multimodal Document QA</a></h2>
 <h5 align="center">📅 Released on <strong>2025.08.01</strong> &nbsp;&nbsp;&nbsp; ⭐ Star us on GitHub for updates!</h5>
@@ -152,4 +149,3 @@ sample_with_retrieval_path: ${dataset.data_dir}/sample_visrag.json
 ```
 
 Evaluation results will be stored in:```results/<dataset>/<run-name>/results.txt```.
-
