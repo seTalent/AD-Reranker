@@ -1,4 +1,3 @@
-
 from models.base_model import BaseModel
 
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration, Qwen2VLForConditionalGeneration
@@ -23,13 +22,15 @@ from openai import OpenAI
 from typing import Dict, Union
 
 from accelerate.utils import send_to_device
+
+
 class MyModel(BaseModel):
     def __init__(self, config):
         self.refiner = RefinerModel(config.refiner)
         self.answer_model = AnswerModel(config.answer)
         self.batch_size = config.answer.decode_batch_size
         self.config = config
-        
+
         self.eval_client = OpenAI(
             api_key=self.config.answer.api_key,
             base_url="https://chatapi.littlewheat.com/v1"
@@ -41,7 +42,6 @@ class MyModel(BaseModel):
         self.eval_model_name = config.answer.eval_model_name
         self.ans_key = self.config.answer.answer_key
         self.cnt_key = self.config.answer.cnt_key
-
 
     @torch.no_grad()
     def predict_dataset(self, dataset: BaseDataset, resume_path=None):
@@ -58,21 +58,21 @@ class MyModel(BaseModel):
         for i, sample in enumerate(tqdm(samples)):
             if resume_path and self.ans_key in sample and self.cnt_key in sample:
                 continue
-            
+
             batch_samples.append(sample)
-          
+
             is_last = (i == len(samples) - 1)
             if len(batch_samples) >= self.batch_size or is_last:
-            
+
                 for sp in batch_samples:
                     question, retrieved_texts, image = dataset.load_sample_retrieval_data(sp)
                     questions.append(question)
                     texts.append(retrieved_texts)
 
                     images.append(image)
-        
+
                 selected_ids, reasons, doc_cnts = self.refiner.batch_select(questions, images, texts)
-            
+
                 final_answers, final_messages = self.answer_model.batch_answer(
                     questions, images, selected_ids, reasons
                 )
@@ -95,8 +95,9 @@ class MyModel(BaseModel):
 
         path = dataset.dump_reults(samples)
         print(f"Save final results to {path}")
+
     @torch.no_grad()
-    def eval_dataset(self, dataset:BaseDataset, resume_path=None):
+    def eval_dataset(self, dataset: BaseDataset, resume_path=None):
         samples, ans_path = dataset.load_latest_results()
         samples_with_answer = []
         for sample in tqdm(samples):
@@ -125,12 +126,12 @@ class MyModel(BaseModel):
         print(f"Save results to {path}.")
 
     @torch.no_grad()
-    def cal_token_dataset(self, dataset:BaseDataset, resume_path=None):
-        
+    def cal_token_dataset(self, dataset: BaseDataset, resume_path=None):
+
         if resume_path:
-                assert os.path.exists(resume_path)
-                with open(resume_path, 'r') as f:
-                    samples = json.load(f)
+            assert os.path.exists(resume_path)
+            with open(resume_path, 'r') as f:
+                samples = json.load(f)
         else:
             samples = dataset.load_data(use_retrieval=True)
 
@@ -155,7 +156,6 @@ class MyModel(BaseModel):
 
                 selected_ids, reasons, doc_cnts = self.refiner.batch_select(questions, images, texts)
 
-                
                 token_stats = self.answer_model.compute_token_count(
                     questions, images, selected_ids, reasons
                 )
@@ -171,11 +171,9 @@ class MyModel(BaseModel):
 
                 batch_samples.clear()
 
-
         result_path = dataset.dump_reults(samples)
         print(f"[Token Analysis] Save token-annotated results to {result_path}")
 
-   
         token_df = pd.DataFrame(all_token_stats)
         summary_path = os.path.join(dataset.config.result_dir, "token_stats.txt")
         with open(summary_path, "a") as f:
@@ -196,13 +194,13 @@ class MyModel(BaseModel):
         except Exception as e:
             print(f"Error evaluating answer: {str(e)}")
             return {"binary_correctness": 0}
-        
+
     def eval_call(self, prompt):
         temp = 0
         messages = [
-            {"role": "user",  "content": prompt}
+            {"role": "user", "content": prompt}
         ]
-        while temp <3 :
+        while temp < 3:
             temp += 1
             response = self.eval_client.chat.completions.create(
                 model=self.eval_model_name,
@@ -214,7 +212,7 @@ class MyModel(BaseModel):
             # messages.append(self.create_ans_message(result))
 
             return result, messages
-        
+
     @torch.no_grad()
     def build_sft_dataset(self, dataset):
         print("[Build SFT Dataset]")
@@ -222,49 +220,91 @@ class MyModel(BaseModel):
         user_message = self.config.refiner.user_message
         few_shot_message = self.config.refiner.few_shot_message
 
-
         samples = dataset.load_data(use_retrieval=True)
 
-
-
         datas = []
-        
+
         for i, sample in enumerate(tqdm(samples)):
-                if len(datas) >= 10:
-                    break
-                question, retrieved_texts, image = dataset.load_sample_retrieval_data(sample)
-                messages = []
-                messages.append({"role": "system", "content":system_message + '\n' + few_shot_message})
-                content = []
-                image_paths = []
-                content.append({"type":"text", "text": user_message.format(question=question)})
-                for i in range(0, len(image)):
-                    content.append({"type": "text", "text": f'[{i+1}]:'}) #[page_id] :
-                    content.append({"type": "image", "image": image[i]}) # document_path
+            if len(datas) >= 10:
+                break
+            question, retrieved_texts, image = dataset.load_sample_retrieval_data(sample)
+            messages = []
+            messages.append({"role": "system", "content": system_message + '\n' + few_shot_message})
+            content = []
+            image_paths = []
+            content.append({"type": "text", "text": user_message.format(question=question)})
+            for i in range(0, len(image)):
+                content.append({"type": "text", "text": f'[{i + 1}]:'})  # [page_id] :
+                content.append({"type": "image", "image": image[i]})  # document_path
 
-                    image_paths.append(image[i])
-                messages.append({"role": "user", "content": content})
-    
-                selected_ids, reasons, _ = self.refiner.batch_select([question], [image], [""])
+                image_paths.append(image[i])
+            messages.append({"role": "user", "content": content})
 
-                if isinstance(selected_ids, list) and reasons!='':
-                    gt = f"<think>{reasons[0]}</think> <answer>{selected_ids[0]}</aswer>"
-        
+            selected_ids, reasons, _ = self.refiner.batch_select([question], [image], [""])
 
-                    data = {"problem": messages, "image_path":image_paths, "solution": gt}
-                    datas.append(data)
+            if isinstance(selected_ids, list) and reasons != '':
+                gt = f"<think>{reasons[0]}</think> <answer>{selected_ids[0]}</aswer>"
+
+                data = {"problem": messages, "image_path": image_paths, "solution": gt}
+                datas.append(data)
         print(f"[SFT DATA BUILDED]")
         return datas
+
+    @torch.no_grad()
+    def quick_start(self, query: str, image_paths: list[str]):
+        """
+        Quick test interface for MyModel.
+        Input:
+            query: str, the question to ask
+            image_paths: list of 4 image paths
+        Returns:
+            final_answer: str
+            selected_ids: list of selected image indices
+            reasoning: str (the 'think' part, if any)
+        """
+
+        # Prepare dummy text inputs (can be empty or [""] * len(image_paths))
+        dummy_texts = [""] * len(image_paths)
+
+        # Step 1: Refiner selects documents
+        selected_ids_batch, reasons_batch, doc_cnts = self.refiner.batch_select(
+            [query], [image_paths], [dummy_texts]
+        )
+        selected_ids = selected_ids_batch[0]
+        reasoning = reasons_batch[0]
+
+        # Step 2: AnswerModel generates final answer
+        answers, _ = self.answer_model.batch_answer(
+            [query], [image_paths], [selected_ids], [reasoning]
+        )
+        final_answer = answers[0]
+
+        # Optional print (or return raw info)
+        print("Selected Page IDs:", selected_ids)
+        print("Reasoning:", reasoning)
+        print("Final Answer:", final_answer)
+
+        return {
+            "query": query,
+            "selected_ids": selected_ids,
+            "reasoning": reasoning,
+            "answer": final_answer
+        }
         # print(f"SFT Dataset[0]:{datas[0]}")
-        
+
+
 class RefinerModel(BaseModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='auto', device_map='auto', trust_remote_code=True).eval()
+        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='auto',
+                                                                        device_map='auto',
+                                                                        trust_remote_code=True).eval()
         # self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.min_pixels, max_pixels=self.config.max_pixels)
 
-        self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.all_pixels, max_pixels=self.config.all_pixels)
+        self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True,
+                                                       min_pixels=self.config.all_pixels,
+                                                       max_pixels=self.config.all_pixels)
         print("[Refiner]:")
         if getattr(self.config, "use_grpo_model", True):
             print(f"[LORA]Load lora model from {self.config.lora_path}")
@@ -274,7 +314,6 @@ class RefinerModel(BaseModel):
                 torch_dtype='auto'
             ).eval()
 
-        
         self.create_ask_message = lambda question: {
             "role": "user",
             "content": [
@@ -292,7 +331,7 @@ class RefinerModel(BaseModel):
 
         self.user_message = self.config.user_message
 
-        self.few_shot_message= self.config.few_shot_message
+        self.few_shot_message = self.config.few_shot_message
 
     def create_text_message(self, question, texts):
 
@@ -306,7 +345,7 @@ class RefinerModel(BaseModel):
         }
         return message
 
-    def create_image_message(self, question: str , images: list[str]):
+    def create_image_message(self, question: str, images: list[str]):
         '''
         images: image_paths
         create image message, every message is formatted as [page_id]: <img>
@@ -315,11 +354,11 @@ class RefinerModel(BaseModel):
         content = []
         prompt_user = self.user_message.format(question=question)
         content.append({"type": "text", "text": prompt_user})
-        #[page_id]: {document}
+        # [page_id]: {document}
         for i in range(len(images)):
-            content.append({"type": "text", "text": f'[{i+1}] :'}) 
-            content.append({"type": "image", "image": images[i]}) # document_path
-        #output_example <think></think>, <answer></answer>
+            content.append({"type": "text", "text": f'[{i + 1}] :'})
+            content.append({"type": "image", "image": images[i]})  # document_path
+        # output_example <think></think>, <answer></answer>
         content.append({"type": "text", "text": self.few_shot_message})
 
         message = {"role": "user", "content": content}
@@ -328,18 +367,18 @@ class RefinerModel(BaseModel):
 
     def process_message(self, question, texts, page_ids, images, history) -> list:
         if history is not None:
-            assert(self.is_valid_history(history))
+            assert (self.is_valid_history(history))
             messages = history
         else:
             messages = []
-        #system message
-        messages.append({"role" : "system", "content" : self.system_message})
-        #add documents and query
+        # system message
+        messages.append({"role": "system", "content": self.system_message})
+        # add documents and query
         messages.append(self.create_image_message(question, images))
 
         return messages
-    
-    def predict(self, question, texts=None, page_ids=None ,images=None, history=None):
+
+    def predict(self, question, texts=None, page_ids=None, images=None, history=None):
         self.clean_up()
         messages = self.process_message(question, texts, page_ids, images, history)
 
@@ -353,11 +392,9 @@ class RefinerModel(BaseModel):
             return_tensors="pt"
         ).to(self.model.device)
 
-
-    
         generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
         generated_ids_trimmed = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         output_text = self.processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_space=False
@@ -366,7 +403,6 @@ class RefinerModel(BaseModel):
 
         self.clean_up()
         return output_text, messages
-
 
     def is_valid_history(self, history):
         if not isinstance(history, list):
@@ -391,7 +427,7 @@ class RefinerModel(BaseModel):
     def batch_select(self, questions, images, texts):
         messages = []
         for (question, image_path, text) in zip(questions, images, texts):
-            message = self.process_message(question,None,None,image_path,None)
+            message = self.process_message(question, None, None, image_path, None)
             messages.append(message)
 
         txts = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages]
@@ -408,7 +444,7 @@ class RefinerModel(BaseModel):
         # Batch Inference
         generated_ids = self.model.generate(**inputs, max_new_tokens=4096)
         generated_ids_trimmed = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         output_texts = self.processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
@@ -418,11 +454,11 @@ class RefinerModel(BaseModel):
         page_cnt = []
         for output_text in output_texts:
             think, answer = self._extract_info(output_text)
-            think=''    
+            think = ''
             all_numbers = re.findall(r'\d+', answer)
             result = [int(n) for n in all_numbers if n in {'1', '2', '3', '4'}]
-            
-            if result == []: #debug
+
+            if result == []:  # debug
                 result = [1, 2, 3, 4]
             result = [1, 2, 3, 4]
             page_cnt.append(len(result))
@@ -434,7 +470,7 @@ class RefinerModel(BaseModel):
     @torch.no_grad()
     def build_sft_data(self, question, images, texts):
         messages = []
-        message = self.process_message(question,None,None,images,None)
+        message = self.process_message(question, None, None, images, None)
         messages.append(message)
 
         txts = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages]
@@ -451,7 +487,7 @@ class RefinerModel(BaseModel):
         # Batch Inference
         generated_ids = self.model.generate(**inputs, max_new_tokens=4096)
         generated_ids_trimmed = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         output_texts = self.processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
@@ -463,17 +499,16 @@ class RefinerModel(BaseModel):
             think, answer = self._extract_info(output_text)
             all_numbers = re.findall(r'\d+', answer)
             result = [int(n) for n in all_numbers if n in {'1', '2', '3', '4'}]
-            
-            if result == []: #DEBUG
+
+            if result == []:  # DEBUG
                 result = [1, 2, 3, 4]
             page_cnt.append(len(result))
             answer = result
             answers.append(answer)
             thinks.append(think)
         return (answers, thinks, page_cnt)
-    
-    
-        
+
+
 class AnswerModel(BaseModel):
     def __init__(self, config, is_eval=True):
         self.config = config
@@ -489,22 +524,23 @@ class AnswerModel(BaseModel):
             quant_config = bnb_config
         else:
             quant_config = None
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='bfloat16', 
+        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='bfloat16',
                                                                         device_map='auto',
                                                                         # device_map={"":last_gpu},
                                                                         trust_remote_code=True,
-                                                                          quantization_config=quant_config
+                                                                        quantization_config=quant_config
                                                                         ).eval()
 
         # self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.min_pixels, max_pixels=self.config.max_pixels)
 
-        self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.all_pixels, max_pixels=self.config.all_pixels, padding_side='left')
+        self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True,
+                                                       min_pixels=self.config.all_pixels,
+                                                       max_pixels=self.config.all_pixels, padding_side='left')
 
         self.system_prompt = self.config.system_prompt
         self.user_message = self.config.user_message
         # self.few_shot_message = self.config.few_shot_message
 
-        
         self.train_client = OpenAI(
             api_key=self.config.api_key,
             base_url="https://chatapi.littlewheat.com/v1"
@@ -514,26 +550,20 @@ class AnswerModel(BaseModel):
         self.train_prompt = self.config.train_prompt
 
         self.train_model_name = self.config.train_model_name
-   
-    
+
         self.batch_size = self.config.BS
         self.num_generation = self.config.G
-        
+
         self.judge = None
 
-   
-        
-
-
     @torch.no_grad()
-    def call(self, completions, kwargs)-> list[int]:
+    def call(self, completions, kwargs) -> list[int]:
 
         prompts = []
-        querys = kwargs['query'] #self.num_generation * batch_size : 
-        answers = kwargs['answer'] # 
+        querys = kwargs['query']  # self.num_generation * batch_size :
+        answers = kwargs['answer']  #
 
-
-        image_paths = kwargs['image'] #  8* list
+        image_paths = kwargs['image']  # 8* list
         doc_counts = []
 
         for (query, content, image_path) in zip(querys, completions, image_paths):
@@ -554,13 +584,13 @@ class AnswerModel(BaseModel):
 
             prompt = self.create_image_message(query, think, page_list, image_path)
             prompts.append(prompt)
-        
+
         texts = [
             self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in prompts
         ]
 
         image_inputs, video_inputs = process_vision_info(prompts)
-        
+
         inputs = self.processor(
             text=texts,
             images=image_inputs,
@@ -569,39 +599,33 @@ class AnswerModel(BaseModel):
             return_tensors="pt"
         )
 
-
-
         inputs = send_to_device(inputs, self.model.device)
-
 
         # for k, v in inputs.items():
         #     if isinstance(v, torch.Tensor):
         #         print(f"{k}: {v.device}, shape: {v.shape}")
         generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
         generated_ids_trimmed = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         output_texts = self.processor.batch_decode(
-           generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
 
         rewards = []
 
         for i in range(self.batch_size):
-            text = output_texts[i*self.num_generation: (i+1)*self.num_generation]
-            gt = answers[i*self.num_generation]
-            question = querys[i*self.num_generation]
-            doc_count = doc_counts[i*self.num_generation: (i+1)*self.num_generation]
+            text = output_texts[i * self.num_generation: (i + 1) * self.num_generation]
+            gt = answers[i * self.num_generation]
+            question = querys[i * self.num_generation]
+            doc_count = doc_counts[i * self.num_generation: (i + 1) * self.num_generation]
             reward = self.get_reward(question, text, gt, doc_count)
             rewards.extend(reward)
-        return rewards 
-    
+        return rewards
 
-
-
-    def get_reward(self, question:str ,answers:list[str], gt:str, doc_counts: list[int]) -> list[float]:
+    def get_reward(self, question: str, answers: list[str], gt: str, doc_counts: list[int]) -> list[float]:
         rewards_1 = []
-        
+
         # for answer in answers:
         prompt = self.train_prompt.format(question=question, gt=gt, answer=answers)
         messages = [
@@ -621,10 +645,10 @@ class AnswerModel(BaseModel):
                 result = response.choices[0].message.content
                 print(f"result = {result}")
                 try:
-                   
+
                     reward_dict = json.loads(result)
                 except json.JSONDecodeError:
-                    
+
                     result_fixed = result.replace("'", '"')
                     reward_dict = json.loads(result_fixed)
                 rewards_1.extend(reward_dict['score'])
@@ -633,7 +657,7 @@ class AnswerModel(BaseModel):
                     rewards_1 = []
                     raise ConnectionError
                 # rewards_1.append(float(reward_dict['score']))
-                break  
+                break
 
             except ConnectionError:
                 if temp < 3:
@@ -645,19 +669,18 @@ class AnswerModel(BaseModel):
             except Exception as e:
                 print(f"***********\nerror: {e} when getting reward. Raw result:{result}\n*************")
                 rewards_1 = []
-                rewards_1.extend([0.0]*len(answers))
+                rewards_1.extend([0.0] * len(answers))
                 break
 
         rewards_2 = []
-        beta = 0.5   # Weight for zero-document penalty
+        beta = 0.5  # Weight for zero-document penalty
         gamma = 0.5  # Penalty value for zero documents (e.g., 0.3 to 0.5 is good for 0-1 reward_1 scale)
 
         # New parameters for more aggressive decay
-        max_positive_reward_val = 0.6 
-        min_positive_reward_val = 0.1 
-        
-       
-        decay_exponent = 1.3 
+        max_positive_reward_val = 0.6
+        min_positive_reward_val = 0.1
+
+        decay_exponent = 1.3
 
         for doc_count in doc_counts:
             doc_count_reward = 0.0
@@ -675,13 +698,9 @@ class AnswerModel(BaseModel):
 
             combined_reward_penalty = (beta * zero_penalty) + doc_count_reward
             rewards_2.append(combined_reward_penalty)
-            
 
-        return [0.5*r1 + 0.5*r2 for r1,r2 in zip(rewards_1, rewards_2)]
+        return [0.5 * r1 + 0.5 * r2 for r1, r2 in zip(rewards_1, rewards_2)]
 
-    
-
-        
     def create_image_message(self, question: str, think: str, selected_ids: list[int], images: list[str]):
         if selected_ids == None or selected_ids == [None]:
             selected_ids = []
@@ -691,27 +710,27 @@ class AnswerModel(BaseModel):
 
         selected_ids = list(dict.fromkeys(selected_ids))
         messages = []
-        messages.append({"role" : "system", "content" : self.system_prompt})
-        
+        messages.append({"role": "system", "content": self.system_prompt})
+
         content = []
         prompt_user = self.user_message.format(question=question, reason=think)
         content.append({"type": "text", "text": prompt_user})
-        #[page_id]: {document}
+        # [page_id]: {document}
         for i in range(len(selected_ids)):
             try:
-                image_path = images[selected_ids[i]-1] #list out of range
+                image_path = images[selected_ids[i] - 1]  # list out of range
             except Exception as e:
                 continue
-            content.append({"type": "text", "text": f'[{selected_ids[i]}] :'}) #[page_id] :
+            content.append({"type": "text", "text": f'[{selected_ids[i]}] :'})  # [page_id] :
             # content.append({"type": "text", "text": f'[{page_ids[i]}] : '}) #[page_id] :
-            content.append({"type": "image", "image": image_path}) # document_path
-        #output_example <think></think>, <answer></answer>
+            content.append({"type": "image", "image": image_path})  # document_path
+        # output_example <think></think>, <answer></answer>
         # content.append({"type": "text", "text": self.few_shot_message})
 
         message = {"role": "user", "content": content}
         messages.append(message)
         return messages
-    
+
     @torch.no_grad()
     def batch_answer(self, questions, images, selected_ids, reasons):
         prompts = []
@@ -723,9 +742,8 @@ class AnswerModel(BaseModel):
             self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in prompts
         ]
 
-
         image_inputs, video_inputs = process_vision_info(prompts)
-        
+
         inputs = self.processor(
             text=texts,
             images=image_inputs,
@@ -735,20 +753,21 @@ class AnswerModel(BaseModel):
         )
         inputs = send_to_device(inputs, self.model.device)
         # inputs = inputs.to(self.model.device)
-        
+
         generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
         generated_ids_trimmed = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         answers = self.processor.batch_decode(
-           generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
 
         return answers, []
+
     def extract_evaluation_metrics(eval_str: str) -> Dict[str, Union[float, int]]:
         try:
-            start_index = eval_str.find('{') 
-            end_index = eval_str.rfind('}') + 1 
+            start_index = eval_str.find('{')
+            end_index = eval_str.rfind('}') + 1
             eval_str = eval_str[start_index:end_index]
             metrics = json.loads(eval_str)
             return {
@@ -762,23 +781,19 @@ class AnswerModel(BaseModel):
             return {
                 'score': 0.0
             }
-        
+
     @torch.no_grad()
     def compute_token_count(self, questions, images, selected_ids, reasons):
         token_counts = []
         for (question, image_paths, selected_id, reason) in zip(questions, images, selected_ids, reasons):
-          
             message = self.create_image_message(question, reason, selected_id, image_paths)
             text = self.processor.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
 
-      
             input_ids = self.processor.tokenizer(text, return_tensors='pt')['input_ids']
             text_token_count = input_ids.shape[1]
 
-       
             image_token_count = 512 * len(selected_id)
 
-    
             total_token_count = text_token_count + image_token_count
 
             token_counts.append({
@@ -790,11 +805,10 @@ class AnswerModel(BaseModel):
         pass
 
 
-
 def extract_evaluation_metrics(eval_str: str) -> Dict[str, Union[float, int]]:
     try:
-        start_index = eval_str.find('{') 
-        end_index = eval_str.rfind('}') + 1 
+        start_index = eval_str.find('{')
+        end_index = eval_str.rfind('}') + 1
         eval_str = eval_str[start_index:end_index]
         metrics = json.loads(eval_str)
         return {
@@ -808,17 +822,14 @@ def extract_evaluation_metrics(eval_str: str) -> Dict[str, Union[float, int]]:
         return {
             'binary_correctness': 0
         }
-    
-
-
 
 
 class QwenVLAnswerModel:
     def __init__(self, model_id: str, max_new_tokens: int = 1024):
         self.model_id = model_id
         self.max_new_tokens = max_new_tokens
-        
-        #Qwen2.5 or Qwen 2 -VL-7B-Instruct
+
+        # Qwen2.5 or Qwen 2 -VL-7B-Instruct
         if "2.5" in model_id:
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_id, device_map="auto", trust_remote_code=True, torch_dtype='auto'
@@ -836,7 +847,7 @@ class QwenVLAnswerModel:
         """build multi-modal prompt：question + [1]: <image> + ..."""
         content = [{"type": "text", "text": question}]
         for i, img_path in enumerate(images):
-            content.append({"type": "text", "text": f"[{i+1}]:"})
+            content.append({"type": "text", "text": f"[{i + 1}]:"})
             content.append({"type": "image", "image": img_path})
         return [{"role": "user", "content": content}]
 
@@ -864,5 +875,4 @@ class QwenVLAnswerModel:
         return decoded[0]
 
 
-    
-    
+
