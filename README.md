@@ -82,7 +82,7 @@ cd data
 ```
 
 + **2.Download the [MP-DocVQA](https://rrc.cvc.uab.es/?ch=17) dataset.**
-+ **3.Download additional benchmarks from [HuggingFace](https://huggingface.co/datasets) .(All benchmarks processed by us will be availabel on [Huggingface](https://huggingface.co/datasets) in the future!)
++ **3.Download additional benchmarks from [HuggingFace](https://huggingface.co/datasets) .(All benchmarks processed by us will be availabel on [Huggingface](https://huggingface.co/datasets) in the future!)**
 
 ## 🧩Data Extraction
 
