@@ -18,7 +18,7 @@
 - [🧪 Evaluation](#evaluation)
 ---
 
-## 📝 Project Log
+## 📝Project Log
 
 + **[2025.08.01]** 📤 Initial codebase uploaded! 
 
