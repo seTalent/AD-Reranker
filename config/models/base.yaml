@@ -11,7 +11,7 @@ max_new_tokens: 256
 temperature: 0
 eval_model_name: gpt-4o 
 train_model_name: gpt-4o 
-api_key: sk-CzUpCW85XaFL6C3uLYPi4P7a7bjnMO7imhzEVOlOBcLpyoB2 
+api_key: sk-
 answer_key: reply
 cnt_key: cnt
 G: 6
