@@ -133,7 +133,7 @@ CUDA_VISIBLE_DEVICES=0,1 python scripts/grpo_train.py --config-name mpdoc
 python scripts/m3docrag_predict.py --config-name mmlb/ldu/ptab/ptext/feta --run-name=<run-name>
 
 # M3DocRAG + MM-R5
-python scripts/m3docrag_predict.py --config-name mmlb/ldu/ptab/ptext/feta --run-name=<run-name>
+python scripts/mmr5_predict.py --config-name mmlb/ldu/ptab/ptext/feta --run-name=<run-name>
 
 # M3DocRAG + AD-Reranker
 python scripts/predict.py --config-name mmlb/ldu/ptab/ptext/feta --run-name=<run-name>
