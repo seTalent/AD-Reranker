@@ -1,0 +1,34 @@
+defaults:
+  - retrieval: image # Change this to text/image when configuring retrieval
+  - models@models.answer: answer
+  - models@models.refiner: refiner
+  - models@models.m3docrag: m3docrag
+  - _self_
+  # - models: refiner
+run-name: mpdocvqa-train # Experiment name
+seed: 42
+dataset:
+  top_k: 1 # Top-k results used during inference
+
+retrieval:
+  top_k: 10 # Top-k results returned during retrieval
+  cuda_visible_devices: '1'
+
+grpo:
+  cuda_visible_devices: '1'
+  output_dir: ckpt/models
+  lora_config:
+    r: 32
+    lora_alpha: 16
+    lora_dropout : 0.05
+    bias: 'none'
+  grpo_config:
+    learning_rate: 5e-6
+    max_completion_length: 2048
+    max_prompt_length: 4096
+    vllm_dtype : 'bfloat16'
+    per_device_train_batch_size: 1
+    num_generations: 1
+
+eval:
+  cuda_visible_devices: '0'

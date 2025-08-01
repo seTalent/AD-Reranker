@@ -1,0 +1,33 @@
+model_id: haha_this_is_empty
+module_name: haha
+class_name: empty
+min_pixels: 200704 #256 * 28 * 28
+max_pixels: 1003520 #1280 * 28 * 28
+all_pixels: 401408
+max_prompt_length: 4096256
+max_completion_length: 2048
+decode_batch_size: 8
+max_new_tokens: 256
+temperature: 0
+eval_model_name: gpt-4o 
+train_model_name: gpt-4o 
+api_key: sk-CzUpCW85XaFL6C3uLYPi4P7a7bjnMO7imhzEVOlOBcLpyoB2 
+answer_key: reply
+cnt_key: cnt
+G: 6
+BS: 1
+judge: llm #gpt
+eval_prompt: |
+  Question: {question}
+  Predicted Answer: {answer}
+  Ground Truth Answer: {gt}
+  
+  Please evaluate if the predicted answer is correct compared to the ground truth.
+  Score the answer on:
+  Binary correctness (0-1): 1 if the answer is correct, 0 if it is incorrect
+
+  Return only a string with these scores in a dictionary and can be parsed by json.loads, e.g. {{"binary_correctness": 1}}
+
+
+build_sft_prompt: |
+  

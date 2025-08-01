@@ -1,0 +1,33 @@
+defaults:
+  - base
+  - _self_
+
+model_id : /data/share_weight/Qwen2.5-VL-7B-Instruct
+module_name: models.qwen
+class_name: Qwen2_5VL
+max_new_tokens: 2048
+use_grpo_model: False
+lora_path: '/data/zky_1/codes/agent/MDocAgent/test_ckpts/7B-checkpoint-240' 
+system_prompt: >
+  A conversation between User and Assistant. The
+  user asks a question, and the Assistant solves it. The
+  assistant first thinks about the reasoning process in
+  the mind and then provides the user with the answer.
+  The reasoning process and answer are enclosed
+  within <think> </think> and <answer> </answer>
+  tags, respectively, i.e., <think> reasoning process
+  here </think> <answer> answer here </answer>.
+user_message: >
+  Given the query: "{question}", select the minimum number of documents from the 4 documents below that are sufficient to accurately answer the question. Each document is in the format: [index]: {{document}}, where {{document}} is the content of that page.
+  First, filter out irrelevant documents. Then, from the remaining ones, select the minimum number necessary to answer the question. Rank them by importance if multiple are required.
+few_shot_message: >
+  After completing the reasoning process, please provide only the list of the selected documents' [index] inside the answer tag. For example, if documents 1 and 2 are sufficient and document 2 is more relevant, your answer should be:
+  <think> reasoning process here </think> <answer>[2, 1]</answer>.
+# user_message: >
+#   Given the query: "{question}",select the minimum number of documents from 4 documents below such that these documents are
+#   sufficient to accurately answer the question. Each document is in the format: [index]: {{document}}
+#   where {{document}} is the content of that page.  
+# few_shot_message: >
+#   After completing the reasoning process, please provide only the  list
+#   of the selected documents' [index] inside the answer tag. For example, if the first and the second documents are sufficient to answer the question,
+#   your answer should be: <think> reasoning process here </think> <answer>[1, 2]</answer>.
