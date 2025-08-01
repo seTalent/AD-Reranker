@@ -24,7 +24,7 @@
 
 
 ---
-## ⚡ Highlights
+## ⚡Highlights
 - **Un-supervised Answer-Driven Training:**  
   AD-Reranker uses the quality of generated answers as the training signal, eliminating the need for manual or LLM-generated ranking labels.
 
@@ -36,19 +36,19 @@
 
 
 ---
-## 🖼️ Overview
+## 🖼️Overview
 <p align="center">
   <img src="assets/overview.png" width="80%">
 </p>
 
 ---
-## 📈 Performance
+## 📈Performance
 <p align="center">
   <img src="assets/table.png" width="80%">
 </p>
 
 ---
-## 🚀 QuickStart
+## 🚀QuickStart
 We provide LoRA checkpoints in the `ckpt/` directory. To use them, update `config/models/answer.yaml` as follows:
 
 ```yaml
@@ -64,7 +64,7 @@ result = model.quick_start(
     image_paths=["img1.png", "img2.png", "img3.png", "img4.png"]
 )
 ```
-## ⚙️ Requirements
+## ⚙️Requirements
 ```bash
 conda create --name ad-reranker python=3.12
 conda activate ad-reranker
@@ -73,7 +73,7 @@ pip install -r requirements.txt
 # or run the install script (not all packages included)
 bash install.sh
 ```
-## 📁 Data Preparation
+## 📁Data Preparation
 + **1.Create a data directory:**
 
 ```
@@ -84,7 +84,7 @@ cd data
 + **2.Download the [MP-DocVQA](https://rrc.cvc.uab.es/?ch=17) dataset.**
 
 + **3.Download additional benchmarks from [HuggingFace](https://huggingface.co/datasets) (temporarily, partically available in our GitHub repo)**
-## 🧩 Data Extraction
+## 🧩Data Extraction
 
 ```bash
 python scripts/extract.py --config-name <dataset>  # mpdoc-vqa/mmlb/ldu/ptab/ptext/feta
@@ -93,7 +93,7 @@ python scripts/extract.py --config-name <dataset>  # mpdoc-vqa/mmlb/ldu/ptab/pte
  ⚠️ The MP-DOCVQA dataset already contains pre-segmented images, so separate image segmentation is not required.
 
 Extracted images will be saved to: ```tmp/<dataset>```
-## 🔍 Retrieval
+## 🔍Retrieval
 
 + **Colpali**:
 
@@ -109,7 +109,7 @@ python build_index.py
 ```
 
 Results will be saved at: ```data/<dataset>/sample-with-retrieval-results.json``` and ```data/<dataset>/sample_visrag.json```.
-## 🎯 Training
+## 🎯Training
 
 + 1.Set your OpenAI API key and select a model in `config/models/base.yaml`:
 
@@ -124,7 +124,7 @@ api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```python
 CUDA_VISIBLE_DEVICES=0,1 python scripts/grpo_train.py --config-name mpdoc
 ```
-## 🧪 Evaluation
+## 🧪Evaluation
 
 + M3DocRAG
 
