@@ -41,7 +41,7 @@
 ---
 ## 📈Performance
 <p align="center">
-  <img src="assets/table.png" width="80%">
+  <img src="assets/table_v2.png" width="80%">
 </p>
 
 ---
