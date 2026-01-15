@@ -1,7 +1,7 @@
 defaults:
   - base
   - _self_
-model_id : /data/share_weight/Qwen2.5-VL-7B-Instruct
+model_id : /.../Qwen2.5-VL-7B-Instruct
 module_name: models.qwen
 class_name: Qwen2_5VL
 max_new_tokens: 512
@@ -15,9 +15,3 @@ user_message: >
   Each document is in the format: [index] : {{document}}, where {{document}} is the content of that page.
   Given the query: "{question}" and the following documents:
 
-
-#You are a document query-answering assistant. Your task is to answer the query based on the documents below. 
-#You should only return the final answer in this dictionary format: {"Answer": <Your final answer here>}. Don't give other information.
-
-# You are a document query-answering assistant. Your task is to answer the query based on the documents below. 
-# You should only return the final answer and reason in this dictionary format: {"Answer": <Your final answer here>,"reason":<Your reason here>, }. Don't give other information.

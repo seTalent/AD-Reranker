@@ -1,6 +1,6 @@
 
-<h2 align="center"><a href="https://arxiv.org/abs/2311.10122">Good Ranks Follow Good Answers: Unsupervised Answer-Driven Reranking for Multimodal Document QA</a></h2>
-<h5 align="center">📅 Released on <strong>2025.08.01</strong> &nbsp;&nbsp;&nbsp; ⭐ Star us on GitHub for updates!</h5>
+<h2 align="center"><a>Good Ranks Follow Good Answers: Unsupervised Answer-Driven Reranking for Multimodal Document QA</a></h2>
+<h5 align="center">📅 Updated on <strong>2026.01.15</strong> &nbsp;&nbsp;&nbsp; ⭐ Star us on GitHub for updates!</h5>
 
 ---
 ## 📚 Contents
@@ -18,9 +18,6 @@
 - [🧪 Evaluation](#evaluation)
 ---
 
-## 📝Project Log
-
-+ **[2025.08.01]** 📤 Initial codebase uploaded! 
 
 
 ---
