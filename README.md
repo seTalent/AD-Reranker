@@ -35,7 +35,7 @@
 ---
 ## 🖼️Overview
 <p align="center">
-  <img src="assets/method_3.pdf" width="80%">
+  <img src="assets/method.png" width="80%">
 </p>
 
 ---
