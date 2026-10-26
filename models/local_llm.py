@@ -7,12 +7,42 @@ started with scripts/serve_vllm.sh.
 import asyncio
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from openai import AsyncOpenAI
 
 
-def to_openai_messages(messages):
-    """qwen_vl_utils messages ({"type": "image", "image": path}) -> OpenAI chat format."""
+def hf_preprocessed(path):
+    """The image the transformers path feeds to the processor, cached as a lossless PNG.
+
+    RefinerModel/AnswerModel first call qwen_vl_utils.process_vision_info, whose smart_resize
+    rounds the page to multiples of 28, and only then resize to all_pixels. Sending the raw page
+    lets the server resize once, which changes pixels and sometimes the visual-token grid.
+    """
+    cached = os.path.join(os.path.dirname(os.path.abspath(path)) + "_qvl", os.path.basename(path))
+    if not cached.endswith(".png"):
+        cached += ".png"
+    if not os.path.exists(cached):
+        from qwen_vl_utils import process_vision_info
+        os.makedirs(os.path.dirname(cached), exist_ok=True)
+        image = process_vision_info([{"role": "user", "content": [{"type": "image", "image": path}]}])[0][0]
+        tmp = cached + f".{os.getpid()}.tmp.png"
+        image.save(tmp)
+        os.replace(tmp, cached)
+    return cached
+
+
+def prepare_images(messages_list, workers=16):
+    """Preprocess every distinct image of a batch in parallel; returns {path: cached path}."""
+    paths = sorted({c["image"] for ms in messages_list for m in ms if isinstance(m["content"], list)
+                    for c in m["content"] if c["type"] == "image"})
+    with ThreadPoolExecutor(workers) as ex:
+        return dict(zip(paths, ex.map(hf_preprocessed, paths)))
+
+
+def to_openai_messages(messages, image_map=None):
+    """qwen_vl_utils messages ({"type": "image", "image": path}) -> OpenAI chat format.
+    image_map replaces image paths (e.g. with prepare_images output)."""
     out = []
     for m in messages:
         content = m["content"]
@@ -20,7 +50,7 @@ def to_openai_messages(messages):
             parts = []
             for c in content:
                 if c["type"] == "image":
-                    path = c["image"]
+                    path = (image_map or {}).get(c["image"], c["image"])
                     url = path if path.startswith(("file://", "http://", "https://", "data:")) \
                         else f"file://{os.path.abspath(path)}"   # dataset paths are relative to the repo root
                     parts.append({"type": "image_url", "image_url": {"url": url}})

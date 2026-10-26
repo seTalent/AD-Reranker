@@ -84,7 +84,12 @@ The end-to-end entry also supports the component:
 - `MyModel.predict_dataset` keeps sample indices explicitly (resumed runs no longer write to
   shifted samples or drop a final partial batch) and stores the refiner output and full response.
 - Optional `backend: vllm` for refiner/answer sends the same messages to a local server
-  (same pixels, greedy decoding with repetition penalty 1.05 as the model's generation config).
+  (greedy decoding with repetition penalty 1.05 as the model's generation config). Images are
+  first passed through the same `qwen_vl_utils.process_vision_info` call as the transformers
+  path and cached as lossless PNGs (`models/local_llm.py::hf_preprocessed`). Sending the raw
+  page instead lets the server resize once rather than twice, which changed the visual-token
+  grid of landscape pages (38x50 vs 38x52) and made 16 of 48 reranker selections differ from the
+  transformers path; with the shared preprocessing the processor inputs agree to 1e-5 on average.
 - `answer.eval_base_url` makes the judge endpoint configurable (local judge instead of the API).
 
 With top-10 candidates and the transformers backend, use `decode_batch_size=1` (or install

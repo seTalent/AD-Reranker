@@ -23,7 +23,7 @@ from typing import Dict, Union
 
 from accelerate.utils import send_to_device
 
-from models.local_llm import LocalLLM, to_openai_messages
+from models.local_llm import LocalLLM, prepare_images, to_openai_messages
 
 
 class MyModel(BaseModel):
@@ -475,7 +475,8 @@ class RefinerModel(BaseModel):
             messages.append(message)
 
         if self.backend == "vllm":
-            outs = self.llm.chat_many([to_openai_messages(m) for m in messages], self.config.max_new_tokens,
+            images_hf = prepare_images(messages)   # same resizing as the transformers path
+            outs = self.llm.chat_many([to_openai_messages(m, images_hf) for m in messages], self.config.max_new_tokens,
                                       extra={"repetition_penalty": self.config.get("repetition_penalty", 1.05)})
             if any(o["error"] for o in outs):
                 raise RuntimeError(f"refiner server error: {[o['error'] for o in outs if o['error']][0]}")
@@ -787,7 +788,8 @@ class AnswerModel(BaseModel):
             message = self.create_image_message(question, reason, selected_id, image_path)
             prompts.append(message)
         if self.backend == "vllm":
-            outs = self.llm.chat_many([to_openai_messages(m) for m in prompts], self.config.max_new_tokens,
+            images_hf = prepare_images(prompts)   # same resizing as the transformers path
+            outs = self.llm.chat_many([to_openai_messages(m, images_hf) for m in prompts], self.config.max_new_tokens,
                                       extra={"repetition_penalty": self.config.get("repetition_penalty", 1.05)})
             if any(o["error"] for o in outs):
                 raise RuntimeError(f"answer server error: {[o['error'] for o in outs if o['error']][0]}")

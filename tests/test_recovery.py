@@ -42,6 +42,21 @@ def test_openai_messages_use_absolute_file_urls():
     assert url == "file://" + os.path.abspath("tmp/X/doc_0.png")
 
 
+def test_vllm_images_match_transformers_preprocessing(tmp_path):
+    import numpy as np
+    from PIL import Image
+    from qwen_vl_utils import process_vision_info
+    from models.local_llm import prepare_images
+    src = tmp_path / "pages" / "doc_0.png"
+    src.parent.mkdir()
+    Image.fromarray((np.random.RandomState(0).rand(1583, 1225, 3) * 255).astype("uint8")).save(src)
+    expected = process_vision_info([{"role": "user", "content": [{"type": "image", "image": str(src)}]}])[0][0]
+    msgs = [[{"role": "user", "content": [{"type": "image", "image": str(src)}]}]]
+    cached = Image.open(prepare_images(msgs)[str(src)])
+    assert cached.size == expected.size and cached.size[0] % 28 == 0 and cached.size[1] % 28 == 0
+    assert np.array_equal(np.asarray(cached.convert("RGB")), np.asarray(expected.convert("RGB")))
+
+
 def test_markdown_blocks_and_labels():
     r = page(0, "# 3 Results\n\nAs shown in Table 2, revenue grew.\n\n"
                 "<table><tr><td>Year</td><td>Revenue</td></tr><tr><td>2019</td><td>5.1</td></tr></table>\n\n"
