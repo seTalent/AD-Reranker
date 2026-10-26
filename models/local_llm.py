@@ -5,6 +5,7 @@ of RefinerModel / AnswerModel. No external API is involved: base_url points to a
 started with scripts/serve_vllm.sh.
 """
 import asyncio
+import os
 import time
 
 from openai import AsyncOpenAI
@@ -20,7 +21,8 @@ def to_openai_messages(messages):
             for c in content:
                 if c["type"] == "image":
                     path = c["image"]
-                    url = path if path.startswith(("file://", "http://", "https://", "data:")) else f"file://{path}"
+                    url = path if path.startswith(("file://", "http://", "https://", "data:")) \
+                        else f"file://{os.path.abspath(path)}"   # dataset paths are relative to the repo root
                     parts.append({"type": "image_url", "image_url": {"url": url}})
                 else:
                     parts.append({"type": "text", "text": c["text"]})

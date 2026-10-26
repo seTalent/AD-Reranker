@@ -32,6 +32,16 @@ def test_refiner_selection_parser():
     assert parse_selection("", 3) == ([1, 2, 3], True)
 
 
+def test_openai_messages_use_absolute_file_urls():
+    from models.local_llm import to_openai_messages
+    m = to_openai_messages([{"role": "system", "content": "s"},
+                            {"role": "user", "content": [{"type": "text", "text": "[1] :"},
+                                                         {"type": "image", "image": "tmp/X/doc_0.png"}]}])
+    assert m[0] == {"role": "system", "content": "s"}
+    url = m[1]["content"][1]["image_url"]["url"]
+    assert url == "file://" + os.path.abspath("tmp/X/doc_0.png")
+
+
 def test_markdown_blocks_and_labels():
     r = page(0, "# 3 Results\n\nAs shown in Table 2, revenue grew.\n\n"
                 "<table><tr><td>Year</td><td>Revenue</td></tr><tr><td>2019</td><td>5.1</td></tr></table>\n\n"

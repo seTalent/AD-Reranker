@@ -86,3 +86,7 @@ The end-to-end entry also supports the component:
 - Optional `backend: vllm` for refiner/answer sends the same messages to a local server
   (same pixels, greedy decoding with repetition penalty 1.05 as the model's generation config).
 - `answer.eval_base_url` makes the judge endpoint configurable (local judge instead of the API).
+
+With top-10 candidates and the transformers backend, use `decode_batch_size=1` (or install
+flash-attn): without flash-attn the Qwen2.5-VL vision tower builds one attention mask over all
+images in the batch, and 8 x 10 pages needs a single 43 GB allocation.
