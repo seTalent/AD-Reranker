@@ -1,0 +1,7 @@
+# Local judge for scripts/rp2_eval.py (served by scripts/serve_vllm.sh judge; no external API).
+base_url: http://127.0.0.1:8103/v1
+model: qwen35-27b
+prompt: v2            # v2: official MMLongBench-Doc-V2 judge prompt; adr: models.answer.eval_prompt (binary correctness)
+thinking: true
+max_tokens: 6144
+concurrency: 64

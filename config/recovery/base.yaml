@@ -1,0 +1,17 @@
+# Post-rerank evidence recovery (recovery/). Disabled unless recovery.enable=true.
+enable: false
+method: ours            # none | ret | adj | graph | rel | ours_ret | ours_all | ours_noprov | ours_tail | ours | oracle
+budget: 2               # b: maximum restored pages
+candidate_limit: 4      # m: dropped pages sent to the single verification call
+mineru_dir: null        # {doc}/MinerU_Page{n}/{n}.md cache; PyMuPDF text from extract.py otherwise
+page_chars: 6000        # per-page OCR budget inside the verifier request
+total_chars: 60000
+# Variants computed by scripts/rp2_recover.py from one reranking run ("method@budget").
+plan: [none, ret@1, ret@2, ret@3, adj@2, graph@1, graph@2, graph@3, rel@2, ours_ret@2, ours_all@2,
+       ours_noprov@2, ours_tail@2, ours@1, ours@2, ours@3, oracle@1, oracle@2, oracle@3]
+verifier:               # text-only verifier served locally (scripts/serve_vllm.sh verifier)
+  base_url: http://127.0.0.1:8102/v1
+  model: qwen35-9b
+  max_tokens: 2048
+  concurrency: 32
+  thinking: false

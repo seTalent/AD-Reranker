@@ -3,6 +3,8 @@ defaults:
   - models@models.answer: answer
   - models@models.refiner: refiner
   - models@models.m3docrag: m3docrag
+  - recovery: base     # post-rerank evidence recovery, off unless recovery.enable=true
+  - judge: local       # local judge used by scripts/rp2_eval.py
   - _self_
   # - models: refiner
 run-name: mpdocvqa-train # Experiment name

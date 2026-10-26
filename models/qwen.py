@@ -23,17 +23,21 @@ from typing import Dict, Union
 
 from accelerate.utils import send_to_device
 
+from models.local_llm import LocalLLM, to_openai_messages
+
 
 class MyModel(BaseModel):
-    def __init__(self, config):
+    def __init__(self, config, recovery_config=None, dataset_config=None):
         self.refiner = RefinerModel(config.refiner)
         self.answer_model = AnswerModel(config.answer)
         self.batch_size = config.answer.decode_batch_size
         self.config = config
 
+        # Judge endpoint: the original API by default; set answer.eval_base_url to a locally
+        # served judge (scripts/serve_vllm.sh) to evaluate without external API calls.
         self.eval_client = OpenAI(
             api_key=self.config.answer.api_key,
-            base_url="https://chatapi.littlewheat.com/v1"
+            base_url=self.config.answer.get("eval_base_url", "https://chatapi.littlewheat.com/v1")
             # base_url="https://api.moonshot.cn/v1"
         )
 
@@ -42,6 +46,36 @@ class MyModel(BaseModel):
         self.eval_model_name = config.answer.eval_model_name
         self.ans_key = self.config.answer.answer_key
         self.cnt_key = self.config.answer.cnt_key
+
+        # Optional post-rerank evidence recovery (recovery/), applied between the refiner and the answer model.
+        self.recovery = None
+        if recovery_config is not None and recovery_config.get("enable", False):
+            from recovery import EvidenceRecovery
+            self.recovery = EvidenceRecovery(recovery_config, dataset_config.extract_path,
+                                             os.path.join(dataset_config.result_dir, "recovery_cache"))
+            self.recovery_method = recovery_config.method
+            self.recovery_budget = recovery_config.budget
+
+    def recover_batch(self, dataset, batch_samples, selected_ids):
+        """Map refiner selections (1-based candidate positions) to positions after recovery."""
+        from recovery import VERIFY_MODE, job_key
+        items, metas = {}, []
+        for sp, ids in zip(batch_samples, selected_ids):
+            cands = list(sp[dataset.config.r_image_key][:dataset.config.top_k])
+            kept = [cands[k - 1] for k in ids if 1 <= k <= len(cands)]
+            key = job_key(sp["doc_id"], sp[dataset.config.question_key], cands, kept)
+            items[key] = self.recovery.context(dataset.EXTRACT_DOCUMENT_ID(sp), sp[dataset.config.question_key], cands, kept)
+            metas.append((key, cands, sp))
+        mode = VERIFY_MODE.get(self.recovery_method)
+        ver = self.recovery.verify(items, mode) if mode else {}
+        out = []
+        for key, cands, sp in metas:
+            gold = [p - 1 for p in eval(sp["evidence_pages"])] if self.recovery_method == "oracle" else ()
+            pages, added = self.recovery.select(self.recovery_method, self.recovery_budget, items[key],
+                                                {mode: ver.get(key)} if mode else {}, gold)
+            sp["recovered_ids"] = [cands.index(p) + 1 for p in added]
+            out.append([cands.index(p) + 1 for p in pages])
+        return out
 
     @torch.no_grad()
     def predict_dataset(self, dataset: BaseDataset, resume_path=None):
@@ -52,46 +86,36 @@ class MyModel(BaseModel):
         else:
             samples = dataset.load_data(use_retrieval=True)
 
-        questions, texts, images = [], [], []
-        batch_samples = []
+        todo = [i for i, s in enumerate(samples)
+                if not (resume_path and self.ans_key in s and self.cnt_key in s)]
+        for start in tqdm(range(0, len(todo), self.batch_size)):
+            batch_idx = todo[start:start + self.batch_size]
+            batch_samples = [samples[i] for i in batch_idx]
+            questions, texts, images = [], [], []
+            for sp in batch_samples:
+                question, retrieved_texts, image = dataset.load_sample_retrieval_data(sp)
+                questions.append(question)
+                texts.append(retrieved_texts)
+                images.append(image)
 
-        for i, sample in enumerate(tqdm(samples)):
-            if resume_path and self.ans_key in sample and self.cnt_key in sample:
-                continue
+            selected_ids, reasons, doc_cnts = self.refiner.batch_select(questions, images, texts)
+            for sp, ids, raw in zip(batch_samples, selected_ids, self.refiner.last_outputs):
+                sp["refiner_ids"], sp["refiner_output"] = ids, raw
+            if self.recovery is not None:
+                selected_ids = self.recover_batch(dataset, batch_samples, selected_ids)
 
-            batch_samples.append(sample)
-
-            is_last = (i == len(samples) - 1)
-            if len(batch_samples) >= self.batch_size or is_last:
-
-                for sp in batch_samples:
-                    question, retrieved_texts, image = dataset.load_sample_retrieval_data(sp)
-                    questions.append(question)
-                    texts.append(retrieved_texts)
-
-                    images.append(image)
-
-                selected_ids, reasons, doc_cnts = self.refiner.batch_select(questions, images, texts)
-
-                final_answers, final_messages = self.answer_model.batch_answer(
-                    questions, images, selected_ids, reasons
-                )
-                print(f"final_answers= {final_answers}")
-                for (j, (final_answer, doc_cnt)) in enumerate(zip(final_answers, doc_cnts)):
-                    global_idx = i - len(batch_samples) + 1 + j
-
-                    print(final_answer)
-                    try:
-                        samples[global_idx][self.cnt_key] = doc_cnt
-                        samples[global_idx][self.ans_key] = json.loads(final_answer)['Answer']
-                    except:
-                        samples[global_idx][self.ans_key] = final_answer
-                self.clean_up()
-
-                questions.clear()
-                texts.clear()
-                images.clear()
-                batch_samples.clear()
+            final_answers, final_messages = self.answer_model.batch_answer(
+                questions, images, selected_ids, reasons
+            )
+            for global_idx, ids, final_answer, doc_cnt in zip(batch_idx, selected_ids, final_answers, doc_cnts):
+                samples[global_idx]["answer_ids"] = ids
+                samples[global_idx]["response"] = final_answer
+                samples[global_idx][self.cnt_key] = doc_cnt
+                try:
+                    samples[global_idx][self.ans_key] = json.loads(final_answer)['Answer']
+                except:
+                    samples[global_idx][self.ans_key] = final_answer
+            self.clean_up()
 
         path = dataset.dump_reults(samples)
         print(f"Save final results to {path}")
@@ -293,26 +317,46 @@ class MyModel(BaseModel):
         # print(f"SFT Dataset[0]:{datas[0]}")
 
 
+def parse_selection(answer: str, k: int):
+    """Candidate positions listed in the <answer> tag, deduplicated and restricted to 1..k.
+    An empty selection falls back to all k candidates. Returns (positions, fell_back)."""
+    picked = []
+    for n in re.findall(r'\d+', answer):
+        if 1 <= int(n) <= k and int(n) not in picked:
+            picked.append(int(n))
+    return (picked, False) if picked else (list(range(1, k + 1)), True)
+
+
 class RefinerModel(BaseModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='auto',
-                                                                        device_map='auto',
-                                                                        trust_remote_code=True).eval()
-        # self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.min_pixels, max_pixels=self.config.max_pixels)
-
-        self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True,
-                                                       min_pixels=self.config.all_pixels,
-                                                       max_pixels=self.config.all_pixels)
+        self.last_outputs = []
+        # backend "vllm": the same messages are sent to a locally served copy of model_id
+        # (scripts/serve_vllm.sh) for throughput; "hf" is the original transformers path.
+        self.backend = self.config.get("backend", "hf")
         print("[Refiner]:")
-        if getattr(self.config, "use_grpo_model", True):
-            print(f"[LORA]Load lora model from {self.config.lora_path}")
-            self.model = PeftModel.from_pretrained(
-                self.model,
-                self.config.lora_path,
-                torch_dtype='auto'
-            ).eval()
+        if self.backend == "vllm":
+            self.llm = LocalLLM(self.config.vllm_base_url, self.config.vllm_model, self.config.get("vllm_concurrency", 32))
+            if getattr(self.config, "use_grpo_model", True):
+                print(f"[LORA] serve the merged LoRA model at {self.config.vllm_base_url}")
+        else:
+            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='auto',
+                                                                            device_map='auto',
+                                                                            trust_remote_code=True).eval()
+            # self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.min_pixels, max_pixels=self.config.max_pixels)
+
+            # left padding: batched generation with a decoder-only model (as in AnswerModel)
+            self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True,
+                                                           min_pixels=self.config.all_pixels,
+                                                           max_pixels=self.config.all_pixels, padding_side='left')
+            if getattr(self.config, "use_grpo_model", True):
+                print(f"[LORA]Load lora model from {self.config.lora_path}")
+                self.model = PeftModel.from_pretrained(
+                    self.model,
+                    self.config.lora_path,
+                    torch_dtype='auto'
+                ).eval()
 
         self.create_ask_message = lambda question: {
             "role": "user",
@@ -352,7 +396,7 @@ class RefinerModel(BaseModel):
         '''
 
         content = []
-        prompt_user = self.user_message.format(question=question)
+        prompt_user = self.user_message.format(question=question, k=len(images))
         content.append({"type": "text", "text": prompt_user})
         # [page_id]: {document}
         for i in range(len(images)):
@@ -430,40 +474,44 @@ class RefinerModel(BaseModel):
             message = self.process_message(question, None, None, image_path, None)
             messages.append(message)
 
-        txts = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages]
-        image_inputs, video_inputs = process_vision_info(messages)
-        inputs = self.processor(
-            text=txts,
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors='pt'
-        )
+        if self.backend == "vllm":
+            outs = self.llm.chat_many([to_openai_messages(m) for m in messages], self.config.max_new_tokens,
+                                      extra={"repetition_penalty": self.config.get("repetition_penalty", 1.05)})
+            if any(o["error"] for o in outs):
+                raise RuntimeError(f"refiner server error: {[o['error'] for o in outs if o['error']][0]}")
+            output_texts = [o["text"] for o in outs]
+        else:
+            txts = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages]
+            image_inputs, video_inputs = process_vision_info(messages)
+            inputs = self.processor(
+                text=txts,
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
+                return_tensors='pt'
+            )
 
-        inputs = inputs.to("cuda")
-        # Batch Inference
-        generated_ids = self.model.generate(**inputs, max_new_tokens=4096)
-        generated_ids_trimmed = [
-            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-        ]
-        output_texts = self.processor.batch_decode(
-            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )
+            inputs = inputs.to("cuda")
+            # Batch Inference
+            generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            ]
+            output_texts = self.processor.batch_decode(
+                generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            )
         answers = []
         thinks = []
         page_cnt = []
-        for output_text in output_texts:
+        self.last_outputs = output_texts
+        self.last_fallbacks = []
+        for output_text, image_path in zip(output_texts, images):
             think, answer = self._extract_info(output_text)
-            think = ''
-            all_numbers = re.findall(r'\d+', answer)
-            result = [int(n) for n in all_numbers if n in {'1', '2', '3', '4'}]
-
-            if result == []:  # debug
-                result = [1, 2, 3, 4]
-            result = [1, 2, 3, 4]
+            think = ''  # the reasoning trace is not passed to the answer model
+            result, fell_back = parse_selection(answer, len(image_path))
+            self.last_fallbacks.append(fell_back)
             page_cnt.append(len(result))
-            answer = result
-            answers.append(answer)
+            answers.append(result)
             thinks.append(think)
         return (answers, thinks, page_cnt)
 
@@ -497,11 +545,7 @@ class RefinerModel(BaseModel):
         page_cnt = []
         for output_text in output_texts:
             think, answer = self._extract_info(output_text)
-            all_numbers = re.findall(r'\d+', answer)
-            result = [int(n) for n in all_numbers if n in {'1', '2', '3', '4'}]
-
-            if result == []:  # DEBUG
-                result = [1, 2, 3, 4]
+            result, _ = parse_selection(answer, len(images))
             page_cnt.append(len(result))
             answer = result
             answers.append(answer)
@@ -524,18 +568,22 @@ class AnswerModel(BaseModel):
             quant_config = bnb_config
         else:
             quant_config = None
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='bfloat16',
-                                                                        device_map='auto',
-                                                                        # device_map={"":last_gpu},
-                                                                        trust_remote_code=True,
-                                                                        quantization_config=quant_config
-                                                                        ).eval()
+        self.backend = self.config.get("backend", "hf")
+        if self.backend == "vllm":
+            self.llm = LocalLLM(self.config.vllm_base_url, self.config.vllm_model, self.config.get("vllm_concurrency", 32))
+        else:
+            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.config.model_id, torch_dtype='bfloat16',
+                                                                            device_map='auto',
+                                                                            # device_map={"":last_gpu},
+                                                                            trust_remote_code=True,
+                                                                            quantization_config=quant_config
+                                                                            ).eval()
 
-        # self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.min_pixels, max_pixels=self.config.max_pixels)
+            # self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True, min_pixels=self.config.min_pixels, max_pixels=self.config.max_pixels)
 
-        self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True,
-                                                       min_pixels=self.config.all_pixels,
-                                                       max_pixels=self.config.all_pixels, padding_side='left')
+            self.processor = AutoProcessor.from_pretrained(self.config.model_id, trust_remote_code=True,
+                                                           min_pixels=self.config.all_pixels,
+                                                           max_pixels=self.config.all_pixels, padding_side='left')
 
         self.system_prompt = self.config.system_prompt
         self.user_message = self.config.user_message
@@ -738,6 +786,13 @@ class AnswerModel(BaseModel):
         for (question, image_path, selected_id, reason) in zip(questions, images, selected_ids, reasons):
             message = self.create_image_message(question, reason, selected_id, image_path)
             prompts.append(message)
+        if self.backend == "vllm":
+            outs = self.llm.chat_many([to_openai_messages(m) for m in prompts], self.config.max_new_tokens,
+                                      extra={"repetition_penalty": self.config.get("repetition_penalty", 1.05)})
+            if any(o["error"] for o in outs):
+                raise RuntimeError(f"answer server error: {[o['error'] for o in outs if o['error']][0]}")
+            self.last_usage = [(o["prompt_tokens"], o["completion_tokens"]) for o in outs]
+            return [o["text"] for o in outs], []
         texts = [
             self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in prompts
         ]

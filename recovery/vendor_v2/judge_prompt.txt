@@ -1,0 +1,80 @@
+Decide whether a document-QA system's response gives the same answer as the reference.
+
+<question>{question}</question>
+<reference_answer>{answer}</reference_answer>
+<expected_format>{answer_format}</expected_format>
+
+<system_response>
+{response}
+</system_response>
+
+Treat the reference answer as correct. Judge the answer the RESPONSE actually gives — its stated
+conclusion — not how a string matcher would score it. Formatting, verbosity, markdown, tables and
+surrounding explanation are irrelevant; extract the answer the response commits to and compare it
+to the reference.
+
+Answer "equivalent": true when the substance matches and only the surface differs:
+- wording, case, pluralisation, word order, punctuation, dashes vs hyphens
+- added or omitted qualifiers that do not change the referent
+  ("White Adults" vs "White", "Rear Admiral Tim Ziemer" vs "Tim Ziemer")
+- numeric formatting, thousands separators, units, %, currency symbols, rounding
+  that leaves the value the same ("18.3" vs "18.29%", "1,175,000" vs "1175000")
+- a list with the same members in a different order, or members phrased differently
+- the correct answer stated plainly, even if buried in a long explanation
+- the response gives the correct answer as an explicit, reasoned alternative alongside
+  another figure — e.g. "5 under a strict reading; including the two year-specific
+  charts it is 7" when the reference is 7. The system found the right answer and said
+  so; which reading it headlines is a presentation choice.
+
+Answer "equivalent": false when the substance differs:
+- a different value, entity, date, or count
+- a list missing members, containing extra members, or with different members
+- an answer at the wrong granularity or about the wrong thing
+- the response declines, says it cannot read the document, or gives no answer
+- the response enumerates many values without analysis and the reference merely
+  appears among them (a shotgun answer, e.g. dumping a whole table row)
+
+Before deciding, strip anything the response itself sets outside its answer. An item is
+segregated when the response marks it as conditional, borderline, footnote-only, excluded by the
+question's stated criteria, or offered under a second reading — "plus X if you count the
+footnote", "X only if year-specific charts are included", "under a strict reading it is 5". Such
+items are NOT members of the answer. Judge what remains after removing them, and do this
+regardless of where they sit: a caveat in the closing clause, a separate bullet, and a labelled
+section are the same thing. Whether the response reads as equivalent must not depend on the
+layout it chose.
+
+Concretely: a response listing exactly the reference members and then separately flagging one
+further item as outside the criteria IS equivalent — the flag is the response excluding it. The
+same item presented as an ordinary member of the same list, with no signal that it is different
+from the others, is NOT. Segregation must be explicit; a member is not excluded merely because
+the response is unsure about it. When a response gives two readings and the reference matches
+either one, that is equivalent — which reading it headlines is a presentation choice.
+
+This never rescues a wrong core answer. Remove the segregated items first; if what remains still
+differs from the reference in value, count, or membership, it is not equivalent.
+
+When the reference answer is exactly "Not answerable", the question is unanswerable from the
+document and a correct response says so. The test is whether the response commits to an answer to
+the question AS ASKED. Explaining the refusal is part of a good refusal, not a substitute answer —
+all of these stay equivalent: naming what the document says instead of what was asked ("the
+decline was among Republicans, not Democrats"), identifying which premise fails, saying the term
+or entity does not appear, or citing the pages it checked. Do not penalise a decline for being
+well-reasoned or specific.
+
+It is NOT equivalent when the response supplies a value and lets it stand as the answer: "the
+document doesn't give X, but the closest figure is 42", a count such as zero offered as the count,
+or a yes/no verdict on the asked question after a nominal decline. The question to ask yourself is
+whether a reader would come away with an answer to what was asked, or with the understanding that
+the document does not answer it.
+
+Be strict about substance. Do not credit a response for being close, well-argued, or confident,
+and do not credit a bare mention of the right value in passing. But do credit a response that
+identifies the reference answer and explains it, even if it headlines a different reading.
+
+Separately, set "abstained": true if the response commits to no answer at all — it says the
+document does not contain the information, says it cannot read the document, or otherwise declines.
+A decline that explains itself is still a decline; reasoning about why the premise fails does not
+make it an answer. Set it false only if the response supplies a value and lets it stand as the
+answer to the question asked. This is independent of "equivalent": a response can
+abstain correctly (equivalent true, abstained true, when the reference is "Not answerable") or
+abstain wrongly (equivalent false, abstained true).

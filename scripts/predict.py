@@ -9,7 +9,7 @@ from models.qwen import MyModel
 @hydra.main(config_path="../config", config_name="base", version_base="1.2")
 def main(cfg):
     dataset = BaseDataset(cfg.dataset)
-    model =  MyModel(cfg.models)
+    model =  MyModel(cfg.models, cfg.recovery, cfg.dataset)
     model.predict_dataset(dataset)
     model.eval_dataset(dataset)
 

@@ -9,9 +9,17 @@ max_completion_length: 2048
 decode_batch_size: 8
 max_new_tokens: 256
 temperature: 0
-eval_model_name: gpt-4o 
-train_model_name: gpt-4o 
+eval_model_name: gpt-4o
+train_model_name: gpt-4o
 api_key: sk-
+eval_base_url: https://chatapi.littlewheat.com/v1  # point to a local judge server to avoid external API calls
+# Inference backend for RefinerModel / AnswerModel: "hf" (transformers, original) or
+# "vllm" (same messages sent to a locally served model_id, see scripts/serve_vllm.sh).
+backend: hf
+vllm_base_url: http://127.0.0.1:8101/v1
+vllm_model: qwen25vl7b
+vllm_concurrency: 32
+repetition_penalty: 1.05  # Qwen2.5-VL generation_config default, used by HF generate
 answer_key: reply
 cnt_key: cnt
 G: 6

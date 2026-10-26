@@ -18,7 +18,7 @@ system_prompt: >
   tags, respectively, i.e., <think> reasoning process
   here </think> <answer> answer here </answer>.
 user_message: >
-  Given the query: "{question}", select the minimum number of documents from the 4 documents below that are sufficient to accurately answer the question. Each document is in the format: [index]: {{document}}, where {{document}} is the content of that page.
+  Given the query: "{question}", select the minimum number of documents from the {k} documents below that are sufficient to accurately answer the question. Each document is in the format: [index]: {{document}}, where {{document}} is the content of that page.
   First, filter out irrelevant documents. Then, from the remaining ones, select the minimum number necessary to answer the question. Rank them by importance if multiple are required.
 few_shot_message: >
   After completing the reasoning process, please provide only the list of the selected documents' [index] inside the answer tag. For example, if documents 1 and 2 are sufficient and document 2 is more relevant, your answer should be:

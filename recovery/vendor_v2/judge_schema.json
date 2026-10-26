@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "equivalent": {
+      "type": "boolean",
+      "description": "true if the response conveys the same answer as the reference"
+    },
+    "abstained": {
+      "type": "boolean",
+      "description": "true if the response committed to no answer at all"
+    },
+    "reason": {
+      "type": "string",
+      "description": "One short sentence."
+    }
+  },
+  "required": [
+    "equivalent",
+    "abstained",
+    "reason"
+  ],
+  "additionalProperties": false
+}
