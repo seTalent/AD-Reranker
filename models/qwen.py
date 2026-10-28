@@ -58,7 +58,7 @@ class MyModel(BaseModel):
 
     def recover_batch(self, dataset, batch_samples, selected_ids):
         """Map refiner selections (1-based candidate positions) to positions after recovery."""
-        from recovery import VERIFY_MODE, job_key
+        from recovery import job_key, mode_of
         items, metas = {}, []
         for sp, ids in zip(batch_samples, selected_ids):
             cands = list(sp[dataset.config.r_image_key][:dataset.config.top_k])
@@ -66,7 +66,7 @@ class MyModel(BaseModel):
             key = job_key(sp["doc_id"], sp[dataset.config.question_key], cands, kept)
             items[key] = self.recovery.context(dataset.EXTRACT_DOCUMENT_ID(sp), sp[dataset.config.question_key], cands, kept)
             metas.append((key, cands, sp))
-        mode = VERIFY_MODE.get(self.recovery_method)
+        mode = mode_of(self.recovery_method)
         ver = self.recovery.verify(items, mode) if mode else {}
         out = []
         for key, cands, sp in metas:

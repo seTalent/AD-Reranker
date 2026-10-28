@@ -1,5 +1,18 @@
 # Post-rerank evidence recovery (research point 2)
 
+> **Final method and results**: gap-conditioned page verification (`scoreNN@b`, multimodal
+> Qwen3.5-9B served with `scripts/serve_vllm.sh verifier_mm`), threshold 0.20, budget 3, reader at
+> 1,280 visual tokens/page (`models.answer.all_pixels=1003520`). On the MMLongBench test split it
+> raises accuracy from 30.0 to 32.5 and gold-page recall from 61.5 to 75.7 over the reranked input.
+> See [evidence_recovery_results.md](evidence_recovery_results.md). The listwise verifier described
+> below (`ours`) was the first version and is kept as a baseline.
+>
+> ```bash
+> python scripts/rp2.py $COMMON +stage=recover "recovery.plan=[none,score20@3]"
+> python scripts/rp2.py $COMMON +stage=answer models.answer.all_pixels=1003520
+> python scripts/rp2.py $COMMON +stage=eval models.answer.all_pixels=1003520 judge.prompt=adr judge.thinking=false
+> ```
+
 A listwise MLLM reranker filters the top-k retrieved pages before answering. It also drops
 pages that the answer needs. This component runs **after** the reranker, never re-ranks
 or re-retrieves, and restores a few of the dropped pages:
