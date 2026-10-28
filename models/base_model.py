@@ -34,6 +34,12 @@ class BaseModel():
     def is_valid_history(self, history):
         return True
     
+    def vllm_extra(self):
+        """Request settings for backend=vllm, mirroring the transformers path: the model's
+        repetition penalty and the processor's min/max pixels (all_pixels)."""
+        return {"repetition_penalty": self.config.get("repetition_penalty", 1.05),
+                "mm_processor_kwargs": {"min_pixels": self.config.all_pixels, "max_pixels": self.config.all_pixels}}
+
     def _extract_info(self, text):
         all_thinks = re.findall(r"<think>(.*?)</think>", text, flags=re.DOTALL)
         think = all_thinks[0].strip() if len(all_thinks) >= 1 else ''

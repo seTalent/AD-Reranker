@@ -477,7 +477,7 @@ class RefinerModel(BaseModel):
         if self.backend == "vllm":
             images_hf = prepare_images(messages)   # same resizing as the transformers path
             outs = self.llm.chat_many([to_openai_messages(m, images_hf) for m in messages], self.config.max_new_tokens,
-                                      extra={"repetition_penalty": self.config.get("repetition_penalty", 1.05)})
+                                      extra=self.vllm_extra())
             if any(o["error"] for o in outs):
                 raise RuntimeError(f"refiner server error: {[o['error'] for o in outs if o['error']][0]}")
             output_texts = [o["text"] for o in outs]
@@ -790,7 +790,7 @@ class AnswerModel(BaseModel):
         if self.backend == "vllm":
             images_hf = prepare_images(prompts)   # same resizing as the transformers path
             outs = self.llm.chat_many([to_openai_messages(m, images_hf) for m in prompts], self.config.max_new_tokens,
-                                      extra={"repetition_penalty": self.config.get("repetition_penalty", 1.05)})
+                                      extra=self.vllm_extra())
             if any(o["error"] for o in outs):
                 raise RuntimeError(f"answer server error: {[o['error'] for o in outs if o['error']][0]}")
             self.last_usage = [(o["prompt_tokens"], o["completion_tokens"]) for o in outs]

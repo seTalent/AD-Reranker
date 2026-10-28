@@ -54,6 +54,10 @@ def report(path, cfg=None):
     for m, s in r["verifier"].items():
         out.append(f"| {m} | {s['called']}/{s['questions']} | {s['requirements']:.2f} | {s['missing']:.2f} | "
                    f"{pct(s['provenance_pass'])}% | {s['prompt_tokens']:.0f} | {s['completion_tokens']:.0f} | {s['graph_ms']:.1f} |")
+    if r.get("judge_agreement"):
+        a = r["judge_agreement"]
+        out += ["", f"裁判一致性：与 {a['reference']} 在 {a['n']} 条共同回答上，equivalent 一致 {pct(a['equivalent'])}%，"
+                    f"abstained 一致 {pct(a['abstained'])}%，判对率 {pct(a['positive_rate'][0])}% / {pct(a['positive_rate'][1])}%。"]
     if r.get("latency"):
         out += ["", f"顺序时延（{r['n_probe']} 题，单请求，秒）", "", "| 环节 | 均值 | 中位数 |", "|---|---|---|"]
         out += [f"| {k} | {v['mean']:.3f} | {v['median']:.3f} |" for k, v in r["latency"].items()]

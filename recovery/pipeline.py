@@ -84,7 +84,7 @@ def parse_plan(entry):
 
 
 def recover_stage(cfg, dataset):
-    from recovery import VERIFY_MODE, EvidenceRecovery, job_key
+    from recovery import EvidenceRecovery, job_key, mode_of
     from recovery.graph import links
     rer = json.load(open(os.path.join(dataset.config.result_dir, "rerank.json")))
     rec = EvidenceRecovery(cfg.recovery, dataset.config.extract_path,
@@ -97,7 +97,7 @@ def recover_stage(cfg, dataset):
         k = job_key(s["doc_id"], s["question"], cands, kept)
         ctxs[k] = rec.context(dataset.EXTRACT_DOCUMENT_ID(s), s[dataset.config.question_key], cands, kept)
         keys.append(k)
-    modes = sorted({VERIFY_MODE[m] for m, _ in plan if m in VERIFY_MODE})
+    modes = sorted({mode_of(m) for m, _ in plan if mode_of(m)})
     ver = {}
     for mode in modes:
         t0 = time.time()
@@ -130,10 +130,16 @@ def answer_key(sample, ids):
     return f"{skey(sample)}||{','.join(map(str, ids))}"
 
 
+def answers_file(cfg):
+    """Answers depend on the reader's page resolution; the AD-Reranker default keeps the original name."""
+    px = cfg.models.answer.all_pixels
+    return "answers.jsonl" if px == 401408 else f"answers_px{px}.jsonl"
+
+
 def answer_stage(cfg, dataset):
     from models.qwen import AnswerModel
     rec = json.load(open(os.path.join(dataset.config.result_dir, "recover.json")))
-    path = os.path.join(dataset.config.result_dir, "answers.jsonl")
+    path = os.path.join(dataset.config.result_dir, answers_file(cfg))
     done = _jsonl(path)
     wanted = cfg.get("variants")
     jobs = {}
@@ -168,6 +174,14 @@ def answer_stage(cfg, dataset):
 
 
 # ---------------------------------------------------------------------------- eval
+def extracted_answer(response):
+    """The "Answer" field that MyModel.predict_dataset stores and eval_dataset judges."""
+    try:
+        return json.loads(response)["Answer"]
+    except Exception:
+        return response
+
+
 def judge_key(sample, response):
     return f"{skey(sample)}||{hashlib.sha1(response.encode()).hexdigest()[:16]}"
 
@@ -178,10 +192,10 @@ def eval_stage(cfg, dataset):
     from recovery.verifier import parse_json
     rd = dataset.config.result_dir
     rec = json.load(open(os.path.join(rd, "recover.json")))
-    answers = _jsonl(os.path.join(rd, "answers.jsonl"))
-    path = os.path.join(rd, "judge.jsonl")
-    done = _jsonl(path)
+    answers = _jsonl(os.path.join(rd, answers_file(cfg)))
     jc = cfg.judge
+    path = os.path.join(rd, jc.get("out", "judge.jsonl"))   # one file per judge setting
+    done = _jsonl(path)
     todo = {}
     for s in rec:
         for v in s["variants"].values():
@@ -191,7 +205,14 @@ def eval_stage(cfg, dataset):
             k = judge_key(s, a["response"])
             if k not in done:
                 todo.setdefault(k, (s, a["response"]))
-    print(f"[eval] {len(done)} cached verdicts, {len(todo)} to judge with {jc.model} ({jc.prompt} prompt)")
+    if jc.get("subset"):    # fixed random subset of all responses, e.g. to calibrate a cheaper judge setting
+        import random
+        every = sorted({judge_key(s, answers[answer_key(s, v["ids"])]["response"]) for s in rec
+                        for v in s["variants"].values() if answer_key(s, v["ids"]) in answers})
+        chosen = set(random.Random(0).sample(every, min(jc.subset, len(every))))
+        todo = {k: x for k, x in todo.items() if k in chosen}
+    print(f"[eval] {len(done)} cached verdicts, {len(todo)} to judge with {jc.model} "
+          f"({jc.prompt} prompt, thinking={jc.thinking}) -> {os.path.basename(path)}")
     if todo:
         llm = LocalLLM(jc.base_url, jc.model, jc.concurrency)
         items = list(todo.items())
@@ -199,8 +220,8 @@ def eval_stage(cfg, dataset):
         for i in tqdm(range(0, len(items), step)):
             batch = items[i:i + step]
             msgs = [v2_eval.judge_messages(s, resp) if jc.prompt == "v2" else
-                    [{"role": "user", "content": cfg.models.answer.eval_prompt.format(
-                        question=s["question"], answer=resp, gt=s["answer"])}] for _, (s, resp) in batch]
+                    [{"role": "user", "content": cfg.models.answer.eval_prompt.format(   # as MyModel.eval_dataset
+                        question=s["question"], answer=extracted_answer(resp), gt=s["answer"])}] for _, (s, resp) in batch]
             schema = v2_eval.SCHEMA if jc.prompt == "v2" else None
             outs = llm.chat_many(msgs, jc.max_tokens, schema=schema, thinking=jc.thinking)
             retry = [j for j, o in enumerate(outs) if not v2_eval.verdict(parse_json(o["text"]), jc.prompt)]
@@ -217,7 +238,19 @@ def eval_stage(cfg, dataset):
                                        ensure_ascii=False) + "\n")
                     if v:
                         done[k] = dict(key=k, verdict=v)
+    if jc.get("subset"):
+        return None
     from recovery.analysis import analyze
     res = analyze(rec, answers, _jsonl(path), rd, cfg)
-    _dump(os.path.join(rd, "eval.json"), res)
+    ref = jc.get("compare_with")     # agreement with another judge setting on the shared responses
+    if ref and os.path.exists(os.path.join(rd, ref)):
+        a, b = _jsonl(path), _jsonl(os.path.join(rd, ref))
+        common = [k for k in a if k in b]
+        res["judge_agreement"] = dict(
+            reference=ref, n=len(common),
+            equivalent=sum(a[k]["verdict"]["equivalent"] == b[k]["verdict"]["equivalent"] for k in common) / max(1, len(common)),
+            abstained=sum(a[k]["verdict"]["abstained"] == b[k]["verdict"]["abstained"] for k in common) / max(1, len(common)),
+            positive_rate=[sum(a[k]["verdict"]["equivalent"] for k in common) / max(1, len(common)),
+                           sum(b[k]["verdict"]["equivalent"] for k in common) / max(1, len(common))])
+    _dump(os.path.join(rd, jc.get("eval_out", "eval.json")), res)
     return res

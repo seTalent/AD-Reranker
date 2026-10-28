@@ -39,6 +39,11 @@ class PageRep:
     defs: dict = field(default_factory=dict)        # label -> defining block id (caption / heading)
     mentions: dict = field(default_factory=dict)    # label -> [block ids] referring to it
     terms: Counter = field(default_factory=Counter)
+    visuals: int = 0                                # figures/images on the page (not in the text blocks)
+
+    @property
+    def has_visual(self):
+        return self.visuals > 0 or any(b.kind == "table" for b in self.blocks)
 
     @property
     def chars(self):
@@ -136,12 +141,17 @@ class PageStore:
             p = os.path.join(self.mineru_dir, doc, f"MinerU_Page{page + 1}", f"{page + 1}.md")
             if os.path.exists(p):
                 with open(p, errors="replace") as f:
-                    blocks = split_markdown(f.read())
+                    md = f.read()
+                blocks = split_markdown(md)
                 if sum(len(t) for _, t in blocks) >= 20:
-                    return build(page, blocks, "mineru")
+                    rep = build(page, blocks, "mineru")
+                    rep.visuals = len(re.findall(r"!\[[^\]]*\]\([^)]*\)", md))
+                    return rep
         t = os.path.join(self.extract_path, f"{doc}_{page}.txt")
         txt = open(t, errors="replace").read() if os.path.exists(t) else ""
-        return build(page, split_plain(txt), "pymupdf")
+        rep = build(page, split_plain(txt), "pymupdf")
+        rep.visuals = 1    # no layout analysis: assume the page may carry figures
+        return rep
 
     def get(self, doc):
         """(reps, document frequency of terms, number of pages)."""

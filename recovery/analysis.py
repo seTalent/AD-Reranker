@@ -38,9 +38,17 @@ def cluster_bootstrap(diff, doc_of, iters=2000, seed=0):
     return stats[int(0.025 * iters)], stats[int(0.975 * iters) - 1]
 
 
+def doc_split(doc_id):
+    """Fixed document-level split: ~5/16 of documents for development, the rest for test."""
+    import hashlib
+    return "dev" if hashlib.sha1(doc_id.encode()).hexdigest()[0] in "01234" else "test"
+
+
 def analyze(rec, answers, judge, result_dir, cfg):
     from recovery.pipeline import answer_key, judge_key, skey
     q_of = {skey(s): s for s in rec}
+    if cfg.get("split"):
+        q_of = {k: s for k, s in q_of.items() if doc_split(s["doc_id"]) == cfg.split}
     doc_of = {k: s["doc_id"] for k, s in q_of.items()}
     split = {}
     for k, s in q_of.items():
@@ -79,6 +87,8 @@ def analyze(rec, answers, judge, result_dir, cfg):
         if not rows:
             continue
         acc, f1 = v2_eval.metrics.acc_and_f1(rows)
+        if cfg.judge.prompt != "v2":
+            f1 = float("nan")    # binary correctness has no abstention verdict, so F1 is undefined
         score[var] = sc
         is_ans = lambda k: not str(q_of[k]["answer"]).startswith("Not answerable")
         n_gold = lambda k: len(split[k]["G"])

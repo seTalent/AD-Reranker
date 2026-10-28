@@ -29,6 +29,11 @@ case $ROLE in
       --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 0, "video": 0}' --reasoning-parser qwen3 \
       --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
+  verifier_mm)
+    exec "$VLLM" serve "$MODELS/Qwen3.5-9B" --served-model-name qwen35-9b-mm --port 8104 \
+      --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
+      --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
   judge)
     exec "$VLLM" serve "$MODELS/Qwen3.5-27B" --served-model-name qwen35-27b --port 8103 \
       --dtype bfloat16 --max-model-len 20480 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \

@@ -99,6 +99,38 @@ def test_provenance_and_gap_support():
     assert rel_ranking('{"useful": [{"candidate": "C2", "reason": ""}, {"candidate": "C9", "reason": ""}]}', {"C2": 5}) == [5]
 
 
+def test_multimodal_messages_and_visual_support():
+    from recovery.verifier import build_input, messages_mm
+    reps = {0: page(0, "Kept text about revenue."), 3: page(3, "Figure 2: Sales by region\n\n![](images/x.jpg)"),
+            5: page(5, "Plain text without figures here.")}
+    reps[3].visuals = 1
+    vin = build_input("q?", [0], [3, 5], reps, {})
+    msgs = messages_mm("q?", vin, lambda p: f"file:///img/{p}.png")
+    urls = [c["image_url"]["url"] for c in msgs[1]["content"] if c["type"] == "image_url"]
+    assert urls == ["file:///img/0.png", "file:///img/3.png", "file:///img/5.png"]
+    out = json.dumps({"requirements": [{"id": "h1", "need": "sales", "status": "missing"}],
+                      "support": [{"requirement": "h1", "candidate": "C1", "source": "visual", "block": "", "quote": "bar chart"},
+                                  {"requirement": "h1", "candidate": "C2", "source": "visual", "block": "", "quote": "chart"}]})
+    res = gap_support(out, vin["cand_ids"], reps)
+    assert res["F"] == {3: {"h1"}} and [a["how"] for a in res["audit"]] == ["visual", "visual-no-figure"]
+
+
+def test_yes_probability_and_score_selection():
+    import math
+    from recovery import EvidenceRecovery, mode_of
+    from recovery.verifier import yes_probability
+    assert abs(yes_probability({"Yes": math.log(0.6), "No": math.log(0.2), "The": math.log(0.1)}) - 0.75) < 1e-9
+    assert yes_probability({"The": -0.1}) is None and yes_probability(None) is None
+    assert mode_of("score40") == "score_mm" and mode_of("ours") == "gap_graph" and mode_of("ret") is None
+    assert mode_of("scorenk30") == "score_nokept" and mode_of("scoreni5") == "score_noimg"
+    ctx = dict(kept=[1], dropped=[4, 2, 7], rank={1: 0, 4: 1, 2: 2, 7: 3}, edges={}, located=[])
+    ver = {"score_mm": {"skipped": False, "scores": {"4": 0.3, "2": 0.9, "7": 0.55}}}
+    er = EvidenceRecovery.__new__(EvidenceRecovery)
+    assert er.select("score50", 2, ctx, ver)[1] == [2, 7]
+    assert er.select("score80", 2, ctx, ver)[1] == [2]
+    assert er.select("score20", 1, ctx, ver) == ([1, 2], [2])
+
+
 def test_greedy_and_insert():
     F = {5: {"h1"}, 6: {"h1", "h2"}, 7: {"h2"}, 8: {"h3"}}
     assert greedy(F, [5, 6, 7, 8], 2) == [6, 8]

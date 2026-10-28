@@ -121,6 +121,9 @@ class ColpaliRetrieval(BaseRetrieval):
         if os.path.exists(embed_path) and not force_prepare:
             with open(embed_path, "rb") as file:
                 document_embeds = pickle.load(file)
+            # documents added to the dataset after the cache was built: prepare() embeds only those
+            if any(s[self.config.doc_key] not in document_embeds for s in dataset.load_data(use_retrieval=True)):
+                document_embeds = self.prepare(dataset)
         else:
             document_embeds = self.prepare(dataset)
         return document_embeds

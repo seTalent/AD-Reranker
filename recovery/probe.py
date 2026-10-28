@@ -31,11 +31,12 @@ def probe(cfg, dataset):
             er = EvidenceRecovery(cfg.recovery, dataset.config.extract_path, os.path.join(rd, "probe_cache"))
             ctx = er.context(dataset.EXTRACT_DOCUMENT_ID(s), q, cands, kept)
             r["doc_repr"], r["graph"] = ctx["t_doc"], ctx["t_graph"]
-            k = job_key(s["doc_id"], q, cands, kept) + f"-probe{time.time_ns()}"
-            t0 = time.perf_counter()
-            er.verify({k: ctx}, "gap_graph")
-            r["verify"] = time.perf_counter() - t0
-            for name in ("rerank", f"ours@{cfg.recovery.budget}", "top10"):
+            for mode in cfg.get("probe_modes", ["gap_graph"]):
+                k = job_key(s["doc_id"], q, cands, kept) + f"-probe{time.time_ns()}"
+                t0 = time.perf_counter()
+                er.verify({k: ctx}, mode)
+                r[f"verify:{mode}"] = time.perf_counter() - t0
+            for name in cfg.get("probe_variants", ["rerank", f"ours@{cfg.recovery.budget}", "top10"]):
                 t0 = time.perf_counter()
                 reader.batch_answer([q], [ims], [s["variants"][name]["ids"]], [""])
                 r[f"read:{name}"] = time.perf_counter() - t0

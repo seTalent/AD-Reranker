@@ -9,6 +9,13 @@ total_chars: 60000
 # Variants computed by scripts/rp2_recover.py from one reranking run ("method@budget").
 plan: [none, ret@1, ret@2, ret@3, adj@2, graph@1, graph@2, graph@3, rel@2, ours_ret@2, ours_all@2,
        ours_noprov@2, ours_tail@2, ours@1, ours@2, ours@3, oracle@1, oracle@2, oracle@3]
+verifier_mm:            # multimodal verifier (page images + text), scripts/serve_vllm.sh verifier_mm
+  base_url: http://127.0.0.1:8104/v1
+  model: qwen35-9b-mm
+  max_tokens: 1536
+  concurrency: 32
+  thinking: false
+  pixels: 602112        # per page (Qwen3.5 merges 32x32 pixels per token: ~590 tokens)
 verifier:               # text-only verifier served locally (scripts/serve_vllm.sh verifier)
   base_url: http://127.0.0.1:8102/v1
   model: qwen35-9b

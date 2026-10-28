@@ -66,13 +66,15 @@ class LocalLLM:
         self.base_url, self.model, self.concurrency = base_url, model, concurrency
         self.timeout = timeout
 
-    async def _one(self, client, sem, messages, max_tokens, schema, thinking, extra, attempts=3):
+    async def _one(self, client, sem, messages, max_tokens, schema, thinking, extra, logprobs=0, attempts=3):
         body = dict(extra or {})
         if thinking is not None:
             body["chat_template_kwargs"] = {"enable_thinking": thinking}
         kwargs = {}
         if schema is not None:
             kwargs["response_format"] = {"type": "json_schema", "json_schema": {"name": "output", "schema": schema}}
+        if logprobs:
+            kwargs.update(logprobs=True, top_logprobs=logprobs)
         last = None
         async with sem:
             for attempt in range(attempts):
@@ -82,23 +84,29 @@ class LocalLLM:
                         model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.0, seed=0,
                         extra_body=body or None, **kwargs)
                     msg = r.choices[0].message
+                    first = None
+                    if logprobs and r.choices[0].logprobs and r.choices[0].logprobs.content:
+                        first = {t.token: t.logprob for t in r.choices[0].logprobs.content[0].top_logprobs}
                     return dict(text=msg.content or "",
                                 reasoning=getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None),
                                 prompt_tokens=r.usage.prompt_tokens, completion_tokens=r.usage.completion_tokens,
-                                finish_reason=r.choices[0].finish_reason, latency=time.perf_counter() - t0, error=None)
+                                finish_reason=r.choices[0].finish_reason, latency=time.perf_counter() - t0, error=None,
+                                first_token_logprobs=first)
                 except Exception as e:  # transport / server errors are retried, then recorded
                     last = f"{type(e).__name__}: {e}"
                     await asyncio.sleep(5 * (attempt + 1))
         return dict(text="", reasoning=None, prompt_tokens=0, completion_tokens=0, finish_reason=None,
                     latency=0.0, error=last)
 
-    async def achat_many(self, batch, max_tokens, schema=None, thinking=None, extra=None):
+    async def achat_many(self, batch, max_tokens, schema=None, thinking=None, extra=None, logprobs=0):
         client = AsyncOpenAI(base_url=self.base_url, api_key="EMPTY", timeout=self.timeout, max_retries=0)
         sem = asyncio.Semaphore(self.concurrency)
         try:
-            return await asyncio.gather(*(self._one(client, sem, m, max_tokens, schema, thinking, extra) for m in batch))
+            return await asyncio.gather(*(self._one(client, sem, m, max_tokens, schema, thinking, extra, logprobs)
+                                          for m in batch))
         finally:
             await client.close()
 
-    def chat_many(self, batch, max_tokens, schema=None, thinking=None, extra=None):
-        return asyncio.run(self.achat_many(batch, max_tokens, schema, thinking, extra))
+    def chat_many(self, batch, max_tokens, schema=None, thinking=None, extra=None, logprobs=0):
+        """logprobs=n also returns the top-n log-probabilities of the first generated token."""
+        return asyncio.run(self.achat_many(batch, max_tokens, schema, thinking, extra, logprobs))

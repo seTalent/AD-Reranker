@@ -49,6 +49,95 @@ REL_SCHEMA = {
 }
 
 
+MM_SYSTEM = ("You audit the evidence given to a document question-answering model. You see each page as an "
+             "image together with its extracted text. Text quotes must be copied verbatim from the extracted text.")
+
+MM_TASK = """Task.
+1. Write the information requirements needed to answer the question: atomic facts, values or relations, each with its conditions (entity, year/period, unit, scope). Use at most 5 requirements; ids h1, h2, ...
+2. Using ONLY the kept pages (images and text), set each requirement's status: "covered" (a kept page shows it under the same conditions), "missing" (no kept page shows it), or "unknown" (the kept pages are unreadable for it). Treat equivalent wording as covered. If the question asks about something the document may not contain, do not invent requirements.
+3. For each MISSING requirement only, list the candidate pages that show it. Use source "text" with the block id and a short verbatim quote (5-25 words) from that block's extracted text, or source "visual" when the information is only in a chart, figure, photo or table image of the page; then put a short description of what the image shows in quote and leave block empty. Do not cite a candidate that is only on the same topic, repeats covered information, or conflicts with the kept pages.
+Return JSON only."""
+
+MM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "requirements": {"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "string"}, "need": {"type": "string"},
+            "status": {"type": "string", "enum": ["covered", "missing", "unknown"]}},
+            "required": ["id", "need", "status"]}},
+        "support": {"type": "array", "items": {"type": "object", "properties": {
+            "requirement": {"type": "string"}, "candidate": {"type": "string"},
+            "source": {"type": "string", "enum": ["text", "visual"]},
+            "block": {"type": "string"}, "quote": {"type": "string"}},
+            "required": ["requirement", "candidate", "source", "block", "quote"]}},
+    },
+    "required": ["requirements", "support"],
+}
+
+
+def messages_mm(question, vin, image_of):
+    """Multimodal verifier request: every kept / candidate page as image + its block-id text."""
+    content = [{"type": "text", "text": f"Question: {question}\n\nKEPT PAGES (already given to the answering model):"}]
+    for group, ids, texts in (("kept", vin["kept_ids"], vin["kept_parts"]), ("cand", vin["cand_ids"], vin["cand_parts"])):
+        if group == "cand":
+            content.append({"type": "text", "text": "\nCANDIDATE PAGES (removed by the reranker):"})
+        for (pid, p), txt in zip(ids.items(), texts):
+            content.append({"type": "text", "text": f'<page id="{pid}" physical_page="{p + 1}">'})
+            content.append({"type": "image_url", "image_url": {"url": image_of(p)}})
+            content.append({"type": "text", "text": f"Extracted text:\n{txt}\n</page>"})
+    content.append({"type": "text", "text": f"\nRELATIONS between candidate and kept pages:\n"
+                                            f"{vin['relation_text'] or '(none)'}\n\n{MM_TASK}"})
+    return [{"role": "system", "content": MM_SYSTEM}, {"role": "user", "content": content}]
+
+
+SCORE_SYSTEM = ("You check whether a document page adds information that is needed to answer a question and "
+                "is not already provided by the pages selected so far.")
+SCORE_ASK = ("Does the CANDIDATE page contain information that is needed to answer the question and is missing "
+             "from the SELECTED pages? Answer with one word: Yes or No.")
+
+
+REL_SYSTEM = "You check whether a document page contains information needed to answer a question."
+REL_ASK = ("Does the CANDIDATE page contain information that is needed to answer the question? "
+           "Answer with one word: Yes or No.")
+
+
+def messages_score(question, kept, cand, texts, relations, image_of, gap=True, images=True):
+    """One gap-conditioned check of a dropped page. The question and the selected pages form a
+    prefix shared by all candidates of the question (prefix-cached by the server).
+    Ablations: gap=False drops the selected pages (plain relevance); images=False sends text only;
+    relations=None omits the relation hints."""
+    def img(p):
+        return [{"type": "image_url", "image_url": {"url": image_of(p)}}] if images else []
+
+    if gap:
+        content = [{"type": "text", "text": f"Question: {question}\n\nSELECTED PAGES:"}]
+        for i, p in enumerate(kept, 1):
+            content += ([{"type": "text", "text": f'<page id="S{i}" physical_page="{p + 1}">'}] + img(p)
+                        + [{"type": "text", "text": f"Extracted text:\n{texts[p]}\n</page>"}])
+    else:
+        content = [{"type": "text", "text": f"Question: {question}\n"}]
+    rel = ""
+    if gap and relations is not None:
+        rel = "Relations of the candidate to selected pages:\n" + ("\n".join(relations) or "(none)") + "\n\n"
+    content += ([{"type": "text", "text": f'\nCANDIDATE PAGE:\n<page id="C" physical_page="{cand + 1}">'}] + img(cand)
+                + [{"type": "text", "text": f"Extracted text:\n{texts[cand]}\n</page>\n{rel}{SCORE_ASK if gap else REL_ASK}"}])
+    return [{"role": "system", "content": SCORE_SYSTEM if gap else REL_SYSTEM}, {"role": "user", "content": content}]
+
+
+def yes_probability(first_token_logprobs):
+    """P(Yes) normalised over the Yes/No answer tokens; None if neither appears in the top tokens."""
+    import math
+    if not first_token_logprobs:
+        return None
+    yes = [v for t, v in first_token_logprobs.items() if t.strip().lower() == "yes"]
+    no = [v for t, v in first_token_logprobs.items() if t.strip().lower() == "no"]
+    if not yes and not no:
+        return None
+    py = sum(math.exp(v) for v in yes)
+    pn = sum(math.exp(v) for v in no)
+    return py / (py + pn)
+
+
 def messages(mode, question, kept_text, cand_text, relation_text):
     task = GAP_TASK if mode == "gap" else REL_TASK
     user = (f"Question: {question}\n\n"
@@ -103,7 +192,13 @@ def build_input(question, kept, cands, reps, edges, page_chars=6000, total_chars
         truncated += [pid] if cut else []
     return dict(kept_ids=kept_ids, cand_ids=cand_ids, kept_text="\n\n".join(parts),
                 cand_text="\n\n".join(cparts), relation_text=_relation_lines(cand_ids, kept_ids, edges),
-                truncated=truncated)
+                truncated=truncated, kept_parts=[_strip_page(x) for x in parts],
+                cand_parts=[_strip_page(x) for x in cparts])
+
+
+def _strip_page(rendered):
+    """Text of a rendered <page> element without its tags (used by the multimodal request)."""
+    return "\n".join(rendered.split("\n")[1:-1])
 
 
 def _norm(s):
@@ -173,7 +268,13 @@ def gap_support(raw, cand_ids, reps, check=True):
             audit.append(dict(s, ok=False, how="not-missing"))
             continue
         bm = _BID.search(str(s.get("block", "")))
-        ok, how = check_provenance(reps[u], bm.group(1) if bm else None, str(s.get("quote", ""))) if check else (True, "unchecked")
+        if not check:
+            ok, how = True, "unchecked"
+        elif s.get("source") == "visual":    # cannot be quoted; the page must at least carry a figure/table
+            ok = reps[u].has_visual
+            how = "visual" if ok else "visual-no-figure"
+        else:
+            ok, how = check_provenance(reps[u], bm.group(1) if bm else None, str(s.get("quote", "")))
         audit.append(dict(s, ok=ok, how=how))
         if ok:
             F.setdefault(u, set()).add(req)
