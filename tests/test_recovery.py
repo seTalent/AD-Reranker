@@ -131,6 +131,19 @@ def test_yes_probability_and_score_selection():
     assert er.select("score20", 1, ctx, ver) == ([1, 2], [2])
 
 
+def test_ranking_metrics_and_tail_suffix():
+    from recovery import EvidenceRecovery, mode_of
+    from recovery.breakdown import _ranking
+    mrr, ndcg = _ranking([5, 2, 9], {2, 9})
+    assert mrr == 0.5 and 0 < ndcg < 1
+    assert _ranking([2, 9], {2, 9}) == (1.0, 1.0)
+    assert mode_of("score20_tail") == "score_mm"
+    ctx = dict(kept=[4, 1], dropped=[2, 5], rank={4: 0, 1: 1, 2: 2, 5: 3}, edges={}, located=[])
+    ver = {"score_mm": {"skipped": False, "scores": {"2": 0.9, "5": 0.8}}}
+    er = EvidenceRecovery.__new__(EvidenceRecovery)
+    assert er.select("score50_tail", 2, ctx, ver) == ([4, 1, 2, 5], [2, 5])
+
+
 def test_greedy_and_insert():
     F = {5: {"h1"}, 6: {"h1", "h2"}, 7: {"h2"}, 8: {"h3"}}
     assert greedy(F, [5, 6, 7, 8], 2) == [6, 8]

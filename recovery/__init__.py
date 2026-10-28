@@ -53,7 +53,8 @@ def split_score(method):
 def mode_of(method):
     """Verification mode a method needs (None for heuristics). scoreNN = gap-conditioned page
     scoring with threshold NN/100; scorenk/scorenr/scoreni = without selected pages / relation
-    hints / page images."""
+    hints / page images. A "_tail" suffix appends restored pages instead of inserting them."""
+    method = method.removesuffix("_tail")
     s = split_score(method)
     return s[0] if s else VERIFY_MODE.get(method)
 
@@ -243,6 +244,9 @@ class EvidenceRecovery:
 
     # ------------------------------------------------------------ selection
     def select(self, method, b, ctx, ver, gold=()):
+        tail = method == "ours_tail" or method.endswith("_tail")
+        if method.endswith("_tail") and method != "ours_tail":
+            method = method.removesuffix("_tail")
         kept, dropped, edges = ctx["kept"], ctx["dropped"], ctx["edges"]
         if method == "none":
             return list(kept), []
@@ -273,4 +277,4 @@ class EvidenceRecovery:
                 F = res["F"] if res else {}
             order = self.pool(ctx, VERIFY_MODE[method])
             R = greedy(F, order, b)
-        return insert(kept, R, edges, tail=method == "ours_tail"), R
+        return insert(kept, R, edges, tail=tail), R

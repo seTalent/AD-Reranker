@@ -17,6 +17,8 @@ EXTRA=()
 [ -n "$KV" ] && EXTRA=(--kv-cache-memory-bytes "$KV")
 # DP=n with <gpu> = "a,b,...": one endpoint, n data-parallel replicas (e.g. the judge on two GPUs)
 [ -n "${DP:-}" ] && EXTRA+=(--data-parallel-size "$DP")
+# LORA=name=path also serves a LoRA adapter (e.g. the trained AD-Reranker: LORA=adr=ckpt); request it by name
+[ -n "${LORA:-}" ] && EXTRA+=(--enable-lora --max-lora-rank 32 --lora-modules "$LORA")
 case $ROLE in
   vlm)
     exec "$VLLM" serve "$MODELS/Qwen2.5-VL-7B-Instruct" --served-model-name qwen25vl7b --port 8101 \

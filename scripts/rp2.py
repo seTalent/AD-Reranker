@@ -31,6 +31,10 @@ def main(cfg):
     elif stage == "probe":
         from recovery.probe import probe
         probe(cfg, dataset)
+    elif stage == "breakdown":
+        import json
+        from recovery.breakdown import breakdown
+        print(json.dumps(breakdown(cfg, dataset), ensure_ascii=False, indent=1))
     elif stage == "report":
         from recovery.report import report
         print(report(os.path.join(cfg.dataset.result_dir, "eval.json"), cfg))
