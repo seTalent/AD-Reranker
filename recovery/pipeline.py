@@ -195,8 +195,9 @@ def eval_stage(cfg, dataset):
     if todo:
         llm = LocalLLM(jc.base_url, jc.model, jc.concurrency)
         items = list(todo.items())
-        for i in tqdm(range(0, len(items), 512)):
-            batch = items[i:i + 512]
+        step = jc.get("batch", 1024)    # verdicts are saved after each batch
+        for i in tqdm(range(0, len(items), step)):
+            batch = items[i:i + step]
             msgs = [v2_eval.judge_messages(s, resp) if jc.prompt == "v2" else
                     [{"role": "user", "content": cfg.models.answer.eval_prompt.format(
                         question=s["question"], answer=resp, gt=s["answer"])}] for _, (s, resp) in batch]
