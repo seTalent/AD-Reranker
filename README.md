@@ -16,7 +16,70 @@
 - [🔍 Retrieval](#retrieval)
 - [🎯 Training](#training)
 - [🧪 Evaluation](#evaluation)
+- [🧩 Post-rerank Evidence Recovery](#post-rerank-evidence-recovery)
 ---
+
+## 🧩Post-rerank Evidence Recovery
+
+This branch adds a component that runs **after** the reranker: the reranker keeps a few of the
+top-10 retrieved pages and often drops pages the answer needs. For every dropped page, a
+multimodal verifier (Qwen3.5-9B) answers *"does this page contain information needed to answer
+the question that the selected pages lack?"*; pages with P(Yes) ≥ τ are restored (at most b),
+next to their related kept page. Code in `recovery/`, stage runner `scripts/rp2.py`.
+
+**Results on MMLongBench** (test split of 681 questions; reader Qwen2.5-VL-7B at 1,280 visual
+tokens per page; local Qwen3.5-27B judge with the binary-correctness prompt of this repository):
+
+| Reranker | Accuracy (rerank → + recovery) | Gold-page recall (rerank → + recovery) | Reader pages |
+|---|---|---|---|
+| Zero-shot Qwen2.5-VL-7B | 30.0 → **32.5** (p = 0.021) | 61.5 → **75.7** | 2.46 → 3.54 |
+| AD-Reranker (`ckpt/`) | 30.0 → **33.6** (p = 0.006) | 52.3 → **72.0** | 1.09 → 2.32 |
+
+Full tables (baselines, ablations, top-4 vs top-10 pool, per-type breakdowns, latency):
+[docs/evidence_recovery_results.md](docs/evidence_recovery_results.md). Method and stage details:
+[docs/evidence_recovery.md](docs/evidence_recovery.md).
+
+### Run
+
+All models are served locally with vLLM (`scripts/serve_vllm.sh`), no external API is used.
+
+```bash
+# 0) data (as in the sections below): extract pages and ColPali top-10 retrieval
+python scripts/extract.py --config-name mmlb
+python scripts/retrieve.py --config-name mmlb retrieval=image
+
+# 1) model servers (set MODELS_DIR to the checkpoint folder, VLLM_BIN to the vllm binary,
+#    MEDIA_ROOT to a directory that contains this repository)
+export MODELS_DIR=/path/to/models VLLM_BIN=$(which vllm) MEDIA_ROOT=$PWD
+LORA=adr=ckpt bash scripts/serve_vllm.sh vlm 0 0.40     # reranker + reader (+ AD-Reranker LoRA "adr")
+bash scripts/serve_vllm.sh verifier_mm 1 0.30 12G        # gap-conditioned page verifier
+bash scripts/serve_vllm.sh judge 1 0.50 16G              # local judge
+
+# 2) stages (each resumes from cached outputs in results/MMLongBench/<run-name>/)
+C="--config-name mmlb run-name=rp2 dataset.top_k=10 \
+   models.refiner.backend=vllm models.answer.backend=vllm \
+   models.refiner.model_id=/path/Qwen2.5-VL-7B-Instruct models.answer.model_id=/path/Qwen2.5-VL-7B-Instruct"
+python scripts/rp2.py $C +stage=rerank                   # add models.refiner.vllm_model=adr for AD-Reranker
+python scripts/rp2.py $C +stage=recover "recovery.plan=[none,ret@2,oracle@2,score20@3]"
+python scripts/rp2.py $C +stage=answer models.answer.all_pixels=1003520
+J="judge.prompt=adr judge.thinking=false +judge.out=judge_adr.jsonl models.answer.all_pixels=1003520"
+python scripts/rp2.py $C +stage=eval $J +split=test +judge.eval_out=eval_test.json
+python scripts/rp2.py $C +stage=breakdown $J +split=test
+```
+
+`recovery.plan` lists the variants as `method@budget`: `none` (reranked pages), `ret` (retrieval
+backfill), `adj`, `graph`, `rel`, `ours*` (first listwise version), `scoreNN` (the method with
+threshold NN/100), `scorenk`/`scorenr`/`scoreni` (ablations without the selected pages / relation
+hints / page images), `oracle` (upper bound), and a `_tail` suffix for appending instead of
+inserting. The end-to-end path also supports it:
+`python scripts/predict.py --config-name mmlb dataset.top_k=10 recovery.enable=true`.
+
+Changes to the existing pipeline on this branch: the refiner selection no longer overwrites its
+output with `[1, 2, 3, 4]` and accepts positions 1..k; the refiner prompt uses the candidate count;
+the refiner pads on the left for batched generation; `predict_dataset` keeps sample indices on
+resume; `retrieve.py` embeds documents missing from an existing embedding cache; an optional
+vLLM backend reproduces the transformers preprocessing; the judge endpoint is configurable.
+Tests: `python -m pytest -q tests`.
 
 
 
