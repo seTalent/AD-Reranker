@@ -111,3 +111,31 @@ class LocalLLM:
     def chat_many(self, batch, max_tokens, schema=None, thinking=None, extra=None, logprobs=0):
         """logprobs=n also returns the top-n log-probabilities of the first generated token."""
         return asyncio.run(self.achat_many(batch, max_tokens, schema, thinking, extra, logprobs))
+
+    async def _sample(self, client, sem, messages, max_tokens, n, temperature, top_p, extra, seed, attempts=3):
+        last = None
+        async with sem:
+            for attempt in range(attempts):
+                t0 = time.perf_counter()
+                try:
+                    r = await client.chat.completions.create(
+                        model=self.model, messages=messages, max_tokens=max_tokens, n=n, temperature=temperature,
+                        top_p=top_p, seed=seed, extra_body=extra or None)
+                    return dict(texts=[c.message.content or "" for c in r.choices], prompt_tokens=r.usage.prompt_tokens,
+                                completion_tokens=r.usage.completion_tokens, latency=time.perf_counter() - t0, error=None)
+                except Exception as e:
+                    last = f"{type(e).__name__}: {e}"
+                    await asyncio.sleep(5 * (attempt + 1))
+        return dict(texts=[], prompt_tokens=0, completion_tokens=0, latency=0.0, error=last)
+
+    def sample_many(self, batch, max_tokens, n, temperature=0.7, top_p=0.95, extra=None, seed=0):
+        """n sampled completions per request (one shared prefill)."""
+        async def run():
+            client = AsyncOpenAI(base_url=self.base_url, api_key="EMPTY", timeout=self.timeout, max_retries=0)
+            sem = asyncio.Semaphore(self.concurrency)
+            try:
+                return await asyncio.gather(*(self._sample(client, sem, m, max_tokens, n, temperature, top_p, extra, seed)
+                                              for m in batch))
+            finally:
+                await client.close()
+        return asyncio.run(run())

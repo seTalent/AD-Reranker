@@ -44,10 +44,18 @@ SCORE_MODES = {"score": "score_mm", "scorenk": "score_nokept", "scorenr": "score
 
 
 def split_score(method):
-    """'scorenr30' -> ('score_norel', 0.30); None for other methods."""
+    """'scorenr30' -> ('score_norel', 0.30); None for other methods.
+    'scoreni20+f50' also restores pages that >= 50% of the reranker's samples select (recovery/resample.py)."""
     import re
-    m = re.fullmatch(r"(score(?:nk|nr|ni)?)(\d+)", method)
+    m = re.fullmatch(r"(score(?:nk|nr|ni)?)(\d+)(?:\+f\d+)?", method)
     return (SCORE_MODES[m.group(1)], int(m.group(2)) / 100) if m else None
+
+
+def split_freq(method):
+    """'scoreni20+f50' -> 0.50 (selection-frequency threshold); None without a frequency rule."""
+    import re
+    m = re.search(r"\+f(\d+)$", method.removesuffix("_tail"))
+    return int(m.group(1)) / 100 if m else None
 
 
 def mode_of(method):
@@ -258,11 +266,20 @@ class EvidenceRecovery:
             R = ctx["located"][:b]
         elif method == "oracle":
             R = [d for d in dropped if d in set(gold)][:b]
+        elif method.startswith("f") and method[1:].isdigit():     # reranker selection frequency alone
+            fr, t = ver.get("freq") or {}, int(method[1:]) / 100
+            R = sorted([p for p in dropped if fr.get(p, 0.0) >= t], key=lambda p: (-fr[p], ctx["rank"][p]))[:b]
         elif split_score(method):
             mode, t = split_score(method)
             v = ver.get(mode)
             sc = {} if not v or v.get("skipped") else {int(p): s for p, s in v["scores"].items()}
-            R = [p for p in sorted(sc, key=lambda p: (-sc[p], ctx["rank"][p])) if sc[p] >= t][:b]
+            f = split_freq(method)
+            if f is None:
+                R = [p for p in sorted(sc, key=lambda p: (-sc[p], ctx["rank"][p])) if sc[p] >= t][:b]
+            else:   # union with the reranker's own sampled selections; ranked by the stronger signal
+                fr = ver.get("freq") or {}
+                ok = [p for p in dropped if sc.get(p, 0.0) >= t or fr.get(p, 0.0) >= f]
+                R = sorted(ok, key=lambda p: (-max(sc.get(p, 0.0), fr.get(p, 0.0)), ctx["rank"][p]))[:b]
         elif method == "rel":
             v = ver.get("rel_graph")
             ranked = [] if not v or v.get("skipped") else (

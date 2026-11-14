@@ -1,14 +1,13 @@
 """Additional metrics for selected variants: accuracy/recall by evidence source, evidence count and
 document type; page-selection precision/recall/F1, MRR and nDCG of the reader input; answer flips
 relative to the reranked input."""
-import ast
 import json
 import math
 import os
 from collections import defaultdict
 
 from recovery.analysis import doc_split, mean
-from recovery.pipeline import _jsonl, answer_key, answers_file, judge_key, skey
+from recovery.pipeline import _jsonl, answer_key, answers_file, as_list, gold_pages, judge_key, skey
 
 
 def _ranking(order, gold):
@@ -41,13 +40,13 @@ def breakdown(cfg, dataset):
                 continue
             ok = float(j["verdict"]["equivalent"])
             correct[v][skey(s)] = ok
-            gold = {p - 1 for p in ast.literal_eval(s["evidence_pages"])}
+            gold = set(gold_pages(s))
             order = [s["cands"][i - 1] for i in ids]
             n_gold = len(gold)
             ev = "unanswerable" if str(s["answer"]).startswith("Not answerable") else (
                 "single-page" if n_gold == 1 else "multi-page" if n_gold > 1 else "no-annotation")
-            cats = dict(by_source=ast.literal_eval(s["evidence_sources"]) or ["none"],
-                        by_evidence=[ev], by_doctype=[s["doc_type"]])
+            cats = dict(by_source=as_list(s.get("evidence_sources", [])) or ["none"],
+                        by_evidence=[ev], by_doctype=[s.get("doc_type", s.get("question_type", "unknown"))])
             if gold:
                 hit = len(set(order) & gold)
                 p, r = hit / max(1, len(order)), hit / n_gold

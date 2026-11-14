@@ -131,6 +131,20 @@ def test_yes_probability_and_score_selection():
     assert er.select("score20", 1, ctx, ver) == ([1, 2], [2])
 
 
+def test_selection_frequency_union():
+    from recovery import EvidenceRecovery, mode_of, split_freq
+    assert mode_of("scoreni20+f50") == "score_noimg" and split_freq("scoreni20+f50") == 0.5
+    assert split_freq("scoreni20") is None and mode_of("f50") is None
+    ctx = dict(kept=[1], dropped=[4, 2, 7], rank={1: 0, 4: 1, 2: 2, 7: 3}, edges={}, located=[])
+    ver = {"score_noimg": {"skipped": False, "scores": {"4": 0.1, "2": 0.3, "7": 0.05}},
+           "freq": {4: 0.5, 7: 1 / 6}}
+    er = EvidenceRecovery.__new__(EvidenceRecovery)
+    assert er.select("scoreni20", 3, ctx, ver)[1] == [2]
+    assert er.select("scoreni20+f50", 3, ctx, ver)[1] == [4, 2]   # 4 enters by frequency, ranked by max signal
+    assert er.select("f50", 3, ctx, ver)[1] == [4]
+    assert er.select("f10", 1, ctx, ver)[1] == [4]
+
+
 def test_ranking_metrics_and_tail_suffix():
     from recovery import EvidenceRecovery, mode_of
     from recovery.breakdown import _ranking
@@ -151,6 +165,13 @@ def test_answer_span_and_normalisation():
     value, mean_lp, min_lp = answer_span(toks)
     assert value == "12.5%" and min_lp == -1.0 and -1.0 <= mean_lp <= -0.3
     assert norm_answer("12.50%") == norm_answer("12.5") and norm_answer(" Yes. ") == "yes"
+
+
+def test_gold_pages_both_formats():
+    from recovery.pipeline import gold_pages
+    assert gold_pages({"evidence_pages": "[3, 5]"}) == [2, 4]       # MMLongBench
+    assert gold_pages({"evidence_pages": [66]}) == [65]              # LongDocURL
+    assert gold_pages({"evidence_pages": "[]"}) == [] and gold_pages({}) == []
 
 
 def test_greedy_and_insert():

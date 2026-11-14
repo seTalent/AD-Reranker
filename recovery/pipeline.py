@@ -21,6 +21,23 @@ def skey(sample):
     return f"{sample['doc_id']}||{sample['question']}"
 
 
+def as_list(value):
+    """MMLongBench stores lists as strings ("[3, 4]"), LongDocURL as JSON lists."""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    import ast
+    try:
+        v = ast.literal_eval(str(value))
+        return list(v) if isinstance(v, (list, tuple)) else [v]
+    except Exception:
+        return []
+
+
+def gold_pages(sample):
+    """0-based gold evidence pages (evidence_pages is 1-based in both datasets)."""
+    return [int(p) - 1 for p in as_list(sample.get("evidence_pages", []))]
+
+
 def _dump(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
@@ -84,7 +101,7 @@ def parse_plan(entry):
 
 
 def recover_stage(cfg, dataset):
-    from recovery import EvidenceRecovery, job_key, mode_of
+    from recovery import EvidenceRecovery, job_key, mode_of, split_freq
     from recovery.graph import links
     rer = json.load(open(os.path.join(dataset.config.result_dir, "rerank.json")))
     rec = EvidenceRecovery(cfg.recovery, dataset.config.extract_path,
@@ -103,14 +120,22 @@ def recover_stage(cfg, dataset):
         t0 = time.time()
         ver[mode] = rec.verify(ctxs, mode)
         print(f"[recover] verification {mode}: {time.time() - t0:.0f}s")
+    samples = {}
+    if any(split_freq(m) is not None for m, _ in plan):   # reranker group sampling, scripts/rp2.py +stage=resample
+        rf = cfg.recovery.get("resample_file", "resample_n6_t0.7.jsonl")
+        samples = _jsonl(os.path.join(dataset.config.result_dir, "recovery_cache", rf))
+        print(f"[recover] selection frequencies from {rf}: {len(samples)} questions")
     out = []
     for s, k in zip(rer, keys):
         ctx, cands = ctxs[k], s["cands"]
-        gold = [p - 1 for p in eval(s["evidence_pages"])]
+        gold = gold_pages(s)
         variants = {"top4": dict(ids=list(range(1, min(4, len(cands)) + 1)), added=[]),
                     "top10": dict(ids=list(range(1, len(cands) + 1)), added=[])}
+        sv = {mode: ver[mode].get(k) for mode in modes}
+        if skey(s) in samples:
+            sv["freq"] = {cands[int(i) - 1]: x for i, x in samples[skey(s)]["freq"].items() if int(i) <= len(cands)}
         for m, b in plan:
-            pages, added = rec.select(m, b, ctx, {mode: ver[mode].get(k) for mode in modes}, gold)
+            pages, added = rec.select(m, b, ctx, sv, gold)
             variants["rerank" if m == "none" else f"{m}@{b}"] = dict(
                 ids=[cands.index(p) + 1 for p in pages], added=[cands.index(p) + 1 for p in added])
         strongest = {}

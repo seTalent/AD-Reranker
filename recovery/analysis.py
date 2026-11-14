@@ -45,14 +45,14 @@ def doc_split(doc_id):
 
 
 def analyze(rec, answers, judge, result_dir, cfg):
-    from recovery.pipeline import answer_key, judge_key, skey
+    from recovery.pipeline import answer_key, gold_pages, judge_key, skey
     q_of = {skey(s): s for s in rec}
     if cfg.get("split"):
         q_of = {k: s for k, s in q_of.items() if doc_split(s["doc_id"]) == cfg.split}
     doc_of = {k: s["doc_id"] for k, s in q_of.items()}
     split = {}
     for k, s in q_of.items():
-        cands, G = s["cands"], {p - 1 for p in eval(s["evidence_pages"])}
+        cands, G = s["cands"], set(gold_pages(s))
         kept = {cands[i - 1] for i in s["refiner_ids"]}
         split[k] = dict(G=G, C=set(cands), kept=kept, D=set(cands) - kept)
     wf = {k for k in q_of if split[k]["G"] & split[k]["D"]}

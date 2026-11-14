@@ -34,6 +34,9 @@ def main(cfg):
     elif stage == "sense":
         from recovery.sensitivity import sense_stage
         sense_stage(cfg, dataset, cfg.get("split"))
+    elif stage == "resample":
+        from recovery.resample import resample_stage
+        resample_stage(cfg, dataset, cfg.get("split"))
     elif stage == "breakdown":
         import json
         from recovery.breakdown import breakdown

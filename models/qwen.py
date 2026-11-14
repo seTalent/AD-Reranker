@@ -59,6 +59,7 @@ class MyModel(BaseModel):
     def recover_batch(self, dataset, batch_samples, selected_ids):
         """Map refiner selections (1-based candidate positions) to positions after recovery."""
         from recovery import job_key, mode_of
+        from recovery.pipeline import gold_pages
         items, metas = {}, []
         for sp, ids in zip(batch_samples, selected_ids):
             cands = list(sp[dataset.config.r_image_key][:dataset.config.top_k])
@@ -70,7 +71,7 @@ class MyModel(BaseModel):
         ver = self.recovery.verify(items, mode) if mode else {}
         out = []
         for key, cands, sp in metas:
-            gold = [p - 1 for p in eval(sp["evidence_pages"])] if self.recovery_method == "oracle" else ()
+            gold = gold_pages(sp) if self.recovery_method == "oracle" else ()
             pages, added = self.recovery.select(self.recovery_method, self.recovery_budget, items[key],
                                                 {mode: ver.get(key)} if mode else {}, gold)
             sp["recovered_ids"] = [cands.index(p) + 1 for p in added]
