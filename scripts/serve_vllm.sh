@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local model servers (vLLM, OpenAI-compatible) for backend=vllm, the recovery verifier and the judge.
-#   bash scripts/serve_vllm.sh vlm|verifier|judge <gpu> [gpu_memory_utilization] [kv_cache_bytes]
+#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|judge|reader3|reader32 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
 # vlm      : Qwen2.5-VL-7B-Instruct for refiner + answer model (512 visual tokens per page, as all_pixels)
 # verifier : Qwen3.5-9B, text-only evidence-recovery verifier
 # judge    : Qwen3.5-27B, MMLongBench-Doc-V2 judge prompt
@@ -17,6 +17,8 @@ EXTRA=()
 [ -n "$KV" ] && EXTRA=(--kv-cache-memory-bytes "$KV")
 # DP=n with <gpu> = "a,b,...": one endpoint, n data-parallel replicas (e.g. the judge on two GPUs)
 [ -n "${DP:-}" ] && EXTRA+=(--data-parallel-size "$DP")
+# EAGER=1 skips torch.compile / CUDA graphs (a second Qwen3.5 instance on one GPU can fail to compile)
+[ -n "${EAGER:-}" ] && EXTRA+=(--enforce-eager)
 # LORA=name=path also serves a LoRA adapter (e.g. the trained AD-Reranker: LORA=adr=ckpt); request it by name
 [ -n "${LORA:-}" ] && EXTRA+=(--enable-lora --max-lora-rank 32 --lora-modules "$LORA")
 case $ROLE in
@@ -41,5 +43,15 @@ case $ROLE in
       --dtype bfloat16 --max-model-len 20480 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 0, "video": 0}' --reasoning-parser qwen3 \
       --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
+  reader3)   # second reader family (models.answer.vllm_base_url=http://127.0.0.1:8105/v1 models.answer.vllm_model=qwen3vl8b)
+    exec "$VLLM" serve "$MODELS/Qwen3-VL-8B-Instruct" --served-model-name qwen3vl8b --port 8105 \
+      --dtype bfloat16 --max-model-len 20480 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 12, "video": 0}' \
+      --allowed-local-media-path "$MEDIA_ROOT" --seed 0 "${EXTRA[@]}" ;;
+  reader32)  # larger reader of the same family (port 8106, models.answer.vllm_model=qwen25vl32b)
+    exec "$VLLM" serve "$MODELS/Qwen2.5-VL-32B-Instruct" --served-model-name qwen25vl32b --port 8106 \
+      --dtype bfloat16 --max-model-len 20480 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 12, "video": 0}' \
+      --allowed-local-media-path "$MEDIA_ROOT" --seed 0 "${EXTRA[@]}" ;;
   *) echo "unknown role $ROLE"; exit 1 ;;
 esac

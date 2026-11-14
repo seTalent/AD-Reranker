@@ -22,7 +22,7 @@ def skey(sample):
 
 
 def as_list(value):
-    """MMLongBench stores lists as strings ("[3, 4]"), LongDocURL as JSON lists."""
+    """Label lists are strings ("[3, 4]") in the MDocAgent files and JSON lists elsewhere."""
     if isinstance(value, (list, tuple)):
         return list(value)
     import ast
@@ -156,9 +156,11 @@ def answer_key(sample, ids):
 
 
 def answers_file(cfg):
-    """Answers depend on the reader's page resolution; the AD-Reranker default keeps the original name."""
+    """Answers depend on the reader and its page resolution; the AD-Reranker default keeps the original name."""
     px = cfg.models.answer.all_pixels
-    return "answers.jsonl" if px == 401408 else f"answers_px{px}.jsonl"
+    reader = cfg.models.answer.get("vllm_model", "qwen25vl7b")
+    tag = "" if reader == "qwen25vl7b" else f"_{reader}"
+    return f"answers{tag}.jsonl" if px == 401408 else f"answers{tag}_px{px}.jsonl"
 
 
 def answer_stage(cfg, dataset):

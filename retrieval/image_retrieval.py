@@ -32,9 +32,13 @@ class ColpaliRetrieval(BaseRetrieval):
         else:
             document_embeds = {}
         samples = dataset.load_data(use_retrieval=True)
+        new_docs = 0
         for sample in tqdm(samples):
             if sample[self.config.doc_key] in document_embeds:
                 continue
+            if new_docs and new_docs % int(self.config.get("checkpoint_every", 50)) == 0:
+                self._save(document_embeds, embed_path)    # resumable: a crash keeps the documents done so far
+            new_docs += 1
             content_list = dataset.load_processed_content(sample, disable_load_image=False) #[img, img_path,txt]
             images = [content.image for content in content_list]
             dataloader = DataLoader(
@@ -49,17 +53,22 @@ class ColpaliRetrieval(BaseRetrieval):
                 with torch.no_grad():
                     batch_image = {k : v.to(self.model.device) for k, v in batch_image.items()}
                     batch_image_embed = self.model(**batch_image)
-                    image_embeds.extend(batch_image_embed)
+                    image_embeds.extend(batch_image_embed.cpu())   # keep the cache off the GPU (~0.5 MB per page)
 
             try:
                 document_embeds[sample[self.config.doc_key]] = torch.stack(image_embeds)
             except:
                 document_embeds[sample[self.config.doc_key]] = None
 
-        with open(embed_path, "wb") as f:
-            pickle.dump(document_embeds, f)
-
+        self._save(document_embeds, embed_path)
         return document_embeds
+
+    @staticmethod
+    def _save(document_embeds, embed_path):
+        tmp = embed_path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(document_embeds, f)
+        os.replace(tmp, embed_path)
 
     #find top-k images for one sample
     def find_sample_topk(self, sample, document_embed, top_k: int, page_id_key: str):
@@ -71,11 +80,11 @@ class ColpaliRetrieval(BaseRetrieval):
 
 
         if page_id_key in sample:
-            page_id_list = sample[page_id_key]
-            assert isinstance(page_id_list, list)
+            from my_datasets.base_dataset import page_list
+            page_id_list = page_list(sample[page_id_key])
 
         retriever_evaluator = CustomEvaluator(is_multi_vector=True)
-        scores = retriever_evaluator.evaluate(query_embed, document_embed)
+        scores = retriever_evaluator.evaluate(query_embed, document_embed.to(query_embed.device))
 
         if page_id_list:
             scores_tensor = torch.tensor(scores)

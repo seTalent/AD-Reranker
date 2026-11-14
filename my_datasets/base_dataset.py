@@ -9,6 +9,14 @@ from datetime import datetime
 import glob
 
 
+def page_list(value):
+    """Page lists are JSON lists in some releases and strings ("[59, 60]") in the MDocAgent files."""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    v = json.loads(value)
+    return list(v) if isinstance(v, (list, tuple)) else [v]
+
+
 @dataclass
 class Content:
     image: Image
@@ -116,7 +124,7 @@ class BaseDataset():
         images = []
 
         if self.config.page_id_key in sample:
-            sample_no_list = sample[self.config.page_id_key]
+            sample_no_list = page_list(sample[self.config.page_id_key])
         else:
             sample_no_list = [i for i in range(0, min(len(content_list), self.config.vlm_max_page))]
         for page in sample_no_list:

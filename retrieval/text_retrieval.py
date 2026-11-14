@@ -58,8 +58,8 @@ class ColbertRetrieval(BaseRetrieval):
         top_page_scores = [page['score'] for page in results]
         
         if page_id_key in sample:
-            page_id_list = sample[page_id_key]
-            assert isinstance(page_id_list, list)
+            from my_datasets.base_dataset import page_list
+            page_id_list = page_list(sample[page_id_key])
             filtered_indices = []
             filtered_scores = []
             for idx, score in zip(top_page_indices, top_page_scores):

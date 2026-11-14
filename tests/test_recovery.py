@@ -145,6 +145,16 @@ def test_selection_frequency_union():
     assert er.select("f10", 1, ctx, ver)[1] == [4]
 
 
+def test_permutation_orders():
+    from recovery.resample import cache_name, permutations
+    P = permutations("doc||q", 10, 6)
+    assert len(P) == 6 and P[0] == list(range(10)) and all(sorted(p) == list(range(10)) for p in P)
+    assert P == permutations("doc||q", 10, 6) and len({tuple(p) for p in P}) == 6
+    shown = [3, 1]                                    # positions the reranker picked in the shuffled list
+    assert [P[1][p - 1] + 1 for p in shown] == [P[1][2] + 1, P[1][0] + 1]
+    assert cache_name(6, 0.7, False) == "resample_n6_t0.7.jsonl" and cache_name(6, 0.7, True) == "resample_perm_n6.jsonl"
+
+
 def test_ranking_metrics_and_tail_suffix():
     from recovery import EvidenceRecovery, mode_of
     from recovery.breakdown import _ranking

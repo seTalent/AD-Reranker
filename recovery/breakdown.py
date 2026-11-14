@@ -72,7 +72,9 @@ def breakdown(cfg, dataset):
         ks = [k for k in correct[v] if k in base]
         out["flips"][v] = dict(fixed=sum(base[k] < correct[v][k] for k in ks),
                                broken=sum(base[k] > correct[v][k] for k in ks), n=len(ks))
-    name = f"breakdown_{cfg.get('split', 'all')}_px{cfg.models.answer.all_pixels}.json"
+    name = answers_file(cfg).replace("answers", f"breakdown_{cfg.get('split', 'all')}", 1).replace(".jsonl", ".json")
+    if "_px" not in name:
+        name = name.replace(".json", f"_px{cfg.models.answer.all_pixels}.json")
     with open(os.path.join(rd, name), "w") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     return out
