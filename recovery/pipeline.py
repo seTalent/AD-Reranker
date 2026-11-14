@@ -34,8 +34,12 @@ def as_list(value):
 
 
 def gold_pages(sample):
-    """0-based gold evidence pages (evidence_pages is 1-based in both datasets)."""
-    return [int(p) - 1 for p in as_list(sample.get("evidence_pages", []))]
+    """0-based gold evidence pages.
+    MMLongBench evidence_pages are 1-based. In MDocAgent's LongDocURL file (recognised by `start_end_idx`)
+    they are already 0-based: the answer string occurs on page index e in 121 of 123 discriminating
+    questions (on e-1 in 2), and 2,321/2,325 questions have every e inside the 0-based page_ids window."""
+    off = 0 if "start_end_idx" in sample else 1
+    return [int(p) - off for p in as_list(sample.get("evidence_pages", []))]
 
 
 def _dump(path, obj):

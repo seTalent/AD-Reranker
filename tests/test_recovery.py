@@ -180,7 +180,7 @@ def test_answer_span_and_normalisation():
 def test_gold_pages_both_formats():
     from recovery.pipeline import gold_pages
     assert gold_pages({"evidence_pages": "[3, 5]"}) == [2, 4]       # MMLongBench
-    assert gold_pages({"evidence_pages": [66]}) == [65]              # LongDocURL
+    assert gold_pages({"evidence_pages": "[66]", "start_end_idx": "[60, 70]"}) == [66]   # LongDocURL, 0-based
     assert gold_pages({"evidence_pages": "[]"}) == [] and gold_pages({}) == []
 
 
