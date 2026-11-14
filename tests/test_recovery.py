@@ -144,6 +144,15 @@ def test_ranking_metrics_and_tail_suffix():
     assert er.select("score50_tail", 2, ctx, ver) == ([4, 1, 2, 5], [2, 5])
 
 
+def test_answer_span_and_normalisation():
+    from recovery.sensitivity import answer_span, norm_answer
+    toks = [('{"', -0.1), ('Answer', -0.1), ('":', -0.1), (' "', -0.2), ('12', -1.0), ('.5', -0.5), ('%",', -0.3),
+            (' "reason', -2.0)]
+    value, mean_lp, min_lp = answer_span(toks)
+    assert value == "12.5%" and min_lp == -1.0 and -1.0 <= mean_lp <= -0.3
+    assert norm_answer("12.50%") == norm_answer("12.5") and norm_answer(" Yes. ") == "yes"
+
+
 def test_greedy_and_insert():
     F = {5: {"h1"}, 6: {"h1", "h2"}, 7: {"h2"}, 8: {"h3"}}
     assert greedy(F, [5, 6, 7, 8], 2) == [6, 8]
