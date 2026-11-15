@@ -37,6 +37,12 @@ def main(cfg):
     elif stage == "resample":
         from recovery.resample import resample_stage
         resample_stage(cfg, dataset, cfg.get("split"))
+    elif stage == "logit":
+        from recovery.logit import logit_stage
+        logit_stage(cfg, dataset, cfg.get("split"))
+    elif stage == "logit_probe":
+        from recovery.logit import latency_probe
+        latency_probe(cfg, dataset)
     elif stage == "breakdown":
         import json
         from recovery.breakdown import breakdown

@@ -200,3 +200,19 @@ def test_render_budget_keeps_priority_blocks():
              + "\n\nThe key fact is 42.")
     txt, cut = render(r, "C1", 1200, keep={r.blocks[-1].bid})
     assert cut and "The key fact is 42." in txt and "[C1.b1] (heading) Head" in txt
+
+
+def test_logit_slot_probs_and_ten_split():
+    import math
+    from recovery.logit import slot_probs, split_first_digit
+    lp = math.log
+    # the answer "[2, 10]": identifiers are written digit by digit
+    tokens = [("<answer>", 0), ("[", 0), ("2", 0), (",", 0), (" ", 0), ("1", 0), ("0", 0), ("]", 0)]
+    tops = [{}, {}, {"2": lp(0.7), "5": lp(0.3)}, {}, {},
+            {"1": lp(0.6), "4": lp(0.4)}, {"0": lp(0.5), ",": lp(0.5)}, {}]
+    p = slot_probs(tokens, tops, 10)
+    assert abs(p[2] - 0.7) < 1e-9 and abs(p[5] - 0.3) < 1e-9 and abs(p[4] - 0.4) < 1e-9
+    assert abs(p[10] - 0.3) < 1e-9 and abs(p[1] - 0.3) < 1e-9     # "1" mass split by P("0") = 0.5
+    q = split_first_digit({"1": lp(0.8), "3": lp(0.2)}, {"0": lp(0.25)}, 10)
+    assert abs(q[10] - 0.2) < 1e-9 and abs(q[1] - 0.6) < 1e-9 and abs(q[3] - 0.2) < 1e-9
+    assert set(split_first_digit({"1": 0.0}, None, 4)) == {1, 2, 3, 4}

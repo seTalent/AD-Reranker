@@ -84,15 +84,16 @@ class LocalLLM:
                         model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.0, seed=0,
                         extra_body=body or None, **kwargs)
                     msg = r.choices[0].message
-                    first, tokens = None, None
+                    first, tokens, tops = None, None, None
                     if logprobs and r.choices[0].logprobs and r.choices[0].logprobs.content:
                         first = {t.token: t.logprob for t in r.choices[0].logprobs.content[0].top_logprobs}
                         tokens = [(t.token, t.logprob) for t in r.choices[0].logprobs.content]
+                        tops = [{x.token: x.logprob for x in t.top_logprobs} for t in r.choices[0].logprobs.content]
                     return dict(text=msg.content or "",
                                 reasoning=getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None),
                                 prompt_tokens=r.usage.prompt_tokens, completion_tokens=r.usage.completion_tokens,
                                 finish_reason=r.choices[0].finish_reason, latency=time.perf_counter() - t0, error=None,
-                                first_token_logprobs=first, token_logprobs=tokens)
+                                first_token_logprobs=first, token_logprobs=tokens, top_logprobs=tops)
                 except Exception as e:  # transport / server errors are retried, then recorded
                     last = f"{type(e).__name__}: {e}"
                     await asyncio.sleep(5 * (attempt + 1))
