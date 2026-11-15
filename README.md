@@ -38,13 +38,15 @@ tokens per page; local Qwen3.5-27B judge with the binary-correctness prompt of t
 **Results on LongDocURL** (MDocAgent version, test split of 1,497 questions, same models and the
 thresholds chosen on the MMLongBench dev split, no re-tuning; zero-shot reranker):
 
-| Method | Accuracy | Gold-page recall | Reader pages |
-|---|---|---|---|
-| Rerank | 54.6 | 68.9 | 1.74 |
-| + recovery (text verifier, τ = 0.2, b = 3) | **56.8** (+2.2, p = 0.006) | **82.1** | 2.56 |
-| Top-10, no rerank | 53.2 | 93.5 | 8.99 |
+| Method | Gold-page recall | Reader pages | Acc. Qwen2.5-VL-7B | Acc. Qwen3-VL-8B |
+|---|---|---|---|---|
+| Rerank | 68.9 | 1.74 | 54.6 | 60.4 |
+| + recovery (text verifier, τ = 0.2, b = 3) | 82.1 | 2.56 | **56.8** (+2.2, p = 0.006) | 63.8 (+3.4, p < 0.001) |
+| + recovery (multimodal verifier ∪ frequency) | **83.8** | 2.73 | 56.6 (+2.0, p = 0.018) | **64.3** (+3.9, p < 0.001) |
+| Retrieval backfill b = 2 | 85.5 | 3.55 | 53.0 (−1.6) | 63.8 (+3.4) |
+| Top-10, no rerank | 93.5 | 8.99 | 53.2 (−1.5) | 65.3 (+4.9) |
 
-On LongDocURL, reading more pages (top-4, top-10, retrieval backfill) lowers accuracy. Selective recovery is the only family that improves it.
+Recovery is the only method that improves accuracy significantly with both readers. Reading more pages (top-4, top-10, retrieval backfill) hurts the 7B reader and helps Qwen3-VL-8B.
 To run it, set `CONFIG=ldu` (`--config-name ldu`); retrieval is restricted to each question's `page_ids` window.
 `evidence_pages` are 0-based in this file and 1-based in MMLongBench; `recovery.pipeline.gold_pages` handles both.
 
