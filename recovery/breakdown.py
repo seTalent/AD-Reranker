@@ -23,9 +23,14 @@ def breakdown(cfg, dataset):
     rd = dataset.config.result_dir
     rec = json.load(open(os.path.join(rd, "recover.json")))
     answers = _jsonl(os.path.join(rd, answers_file(cfg)))
-    judge = _jsonl(os.path.join(rd, cfg.judge.get("out", "judge.jsonl")))
+    judge_path = os.path.join(rd, cfg.judge.get("out", "judge.jsonl"))
+    if not os.path.exists(judge_path):   # a silent empty breakdown is worse than a failure
+        raise FileNotFoundError(f"{judge_path} missing; pass the judge file used by eval (+judge.out=...)")
+    judge = _jsonl(judge_path)
     if cfg.get("split"):
         rec = [s for s in rec if doc_split(s["doc_id"]) == cfg.split]
+    seen = set()   # duplicate rows (same document and question) count once, as in eval
+    rec = [s for s in rec if not (skey(s) in seen or seen.add(skey(s)))]
     variants = list(cfg.get("breakdown_variants", ["rerank", "score20@3", "top10"]))
     correct = defaultdict(dict)
     out = dict(selection={}, by_source={}, by_evidence={}, by_doctype={}, flips={})

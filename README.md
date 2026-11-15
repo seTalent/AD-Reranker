@@ -35,6 +35,19 @@ tokens per page; local Qwen3.5-27B judge with the binary-correctness prompt of t
 | Zero-shot Qwen2.5-VL-7B | 30.0 → **32.5** (p = 0.021) | 61.5 → **75.7** | 2.46 → 3.54 |
 | AD-Reranker (`ckpt/`) | 30.0 → **33.6** (p = 0.006) | 52.3 → **72.0** | 1.09 → 2.32 |
 
+**Results on LongDocURL** (MDocAgent version, test split of 1,497 questions, same models and the
+thresholds chosen on the MMLongBench dev split, no re-tuning; zero-shot reranker):
+
+| Method | Accuracy | Gold-page recall | Reader pages |
+|---|---|---|---|
+| Rerank | 54.6 | 68.9 | 1.74 |
+| + recovery (text verifier, τ = 0.2, b = 3) | **56.8** (+2.2, p = 0.006) | **82.1** | 2.56 |
+| Top-10, no rerank | 53.2 | 93.5 | 8.99 |
+
+On LongDocURL, reading more pages (top-4, top-10, retrieval backfill) lowers accuracy. Selective recovery is the only family that improves it.
+To run it, set `CONFIG=ldu` (`--config-name ldu`); retrieval is restricted to each question's `page_ids` window.
+`evidence_pages` are 0-based in this file and 1-based in MMLongBench; `recovery.pipeline.gold_pages` handles both.
+
 Full tables (baselines, ablations, top-4 vs top-10 pool, per-type breakdowns, latency):
 [docs/evidence_recovery_results.md](docs/evidence_recovery_results.md). Method and stage details:
 [docs/evidence_recovery.md](docs/evidence_recovery.md).
