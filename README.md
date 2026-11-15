@@ -46,6 +46,9 @@ thresholds chosen on the MMLongBench dev split, no re-tuning; zero-shot reranker
 | Retrieval backfill b = 2 | 85.5 | 3.55 | 53.0 (−1.6) | 63.8 (+3.4) |
 | Top-10, no rerank | 93.5 | 8.99 | 53.2 (−1.5) | 65.3 (+4.9) |
 
+With the trained AD-Reranker (1.12 pages kept), recovery (multimodal verifier ∪ frequency) gives
+54.0 → **56.7** (7B) and 58.4 → **64.7** (Qwen3-VL-8B, +6.3), on par with top-10 (64.9) at 2.20 pages instead of 8.99.
+
 Recovery is the only method that improves accuracy significantly with both readers. Reading more pages (top-4, top-10, retrieval backfill) hurts the 7B reader and helps Qwen3-VL-8B.
 To run it, set `CONFIG=ldu` (`--config-name ldu`); retrieval is restricted to each question's `page_ids` window.
 `evidence_pages` are 0-based in this file and 1-based in MMLongBench; `recovery.pipeline.gold_pages` handles both.
