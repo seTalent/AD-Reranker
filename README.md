@@ -53,6 +53,17 @@ Recovery is the only method that improves accuracy significantly with both reade
 To run it, set `CONFIG=ldu` (`--config-name ldu`); retrieval is restricted to each question's `page_ids` window.
 `evidence_pages` are 0-based in this file and 1-based in MMLongBench; `recovery.pipeline.gold_pages` handles both.
 
+**Reranker uncertainty without sampling.** The "frequency" signal above comes from group sampling
+(6 extra reranks, +164–189% of the rerank latency). Reading the reranker's own first-identifier
+distribution instead (FIRST-style: force `<answer>[`, decode 1 token; `+stage=logit`) costs +23%
+(0.52 s vs 2.27 s per question). Its test AUC on dropped pages is 0.726–0.746, above temperature
+sampling (0.637–0.684) on all four reranker × dataset settings and on par with permutation sampling
+on MMLongBench (0.748). End-to-end accuracy with `score20+fNN` is within ±0.5 of the
+sampling version in all eight reranker × dataset × reader cells. Content-free calibration of the
+position bias did not help. Details: section 17 of the results doc;
+`python scripts/rp2_logit_analysis.py <run dir> --write first` writes the recover-stage signal file
+(`+recovery.resample_file=resample_logit_first.jsonl`).
+
 Full tables (baselines, ablations, top-4 vs top-10 pool, per-type breakdowns, latency):
 [docs/evidence_recovery_results.md](docs/evidence_recovery_results.md). Method and stage details:
 [docs/evidence_recovery.md](docs/evidence_recovery.md).
