@@ -45,7 +45,8 @@ def gold_pages(sample):
 def _dump(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=1)
+        json.dump(obj, f, ensure_ascii=False, indent=1,
+                  default=lambda o: list(o) if hasattr(o, "__iter__") else str(o))   # OmegaConf ListConfig
     os.replace(tmp, path)
 
 
@@ -164,11 +165,17 @@ def answers_file(cfg):
     px = cfg.models.answer.all_pixels
     reader = cfg.models.answer.get("vllm_model", "qwen25vl7b")
     tag = "" if reader == "qwen25vl7b" else f"_{reader}"
-    return f"answers{tag}.jsonl" if px == 401408 else f"answers{tag}_px{px}.jsonl"
+    name = f"answers{tag}" if px == 401408 else f"answers{tag}_px{px}"
+    if cfg.get("reading"):      # evidence-aware reading (recovery/reading.py) keeps its own answers
+        from recovery.reading import file_tag
+        name += f"_{file_tag(cfg.reading)}"
+    return name + ".jsonl"
 
 
 def answer_stage(cfg, dataset):
     from models.qwen import AnswerModel
+    if cfg.get("reading"):
+        return reading_answer_stage(cfg, dataset)
     rec = json.load(open(os.path.join(dataset.config.result_dir, "recover.json")))
     path = os.path.join(dataset.config.result_dir, answers_file(cfg))
     done = _jsonl(path)
@@ -204,6 +211,76 @@ def answer_stage(cfg, dataset):
             f.flush()
 
 
+def reading_answer_stage(cfg, dataset):
+    """answer_stage with evidence-aware reading (recovery/reading.py): the prompt marks recovered pages
+    and/or adds their text, and the reader's token log-probabilities are kept for answer-level fallback.
+    Requires backend=vllm. `+variants=[...]` limits the variants; `+split=dev|test` the questions."""
+    from models.local_llm import prepare_images, to_openai_messages
+    from models.qwen import AnswerModel
+    from recovery import reading
+    from recovery.analysis import doc_split
+    from recovery.pagerep import PageStore
+    opts = reading.parse(cfg.reading)
+    rec = json.load(open(os.path.join(dataset.config.result_dir, "recover.json")))
+    path = os.path.join(dataset.config.result_dir, answers_file(cfg))
+    done = _jsonl(path)
+    wanted, split = cfg.get("variants"), cfg.get("split")
+    jobs = {}
+    for s in rec:
+        if split and doc_split(s["doc_id"]) != split:
+            continue
+        rer = set(s["variants"]["rerank"]["ids"])
+        for name, v in s["variants"].items():
+            if wanted and name not in wanted:
+                continue
+            k = answer_key(s, v["ids"])
+            if k not in done:   # the recovered pages are the ones the reranker did not keep
+                jobs.setdefault(k, (s, v["ids"], [i for i in v["ids"] if i not in rer]))
+    if opts != {"plain"} and "text_all" not in opts:     # without recovered pages the prompt equals plain
+        from omegaconf import OmegaConf
+        pc = OmegaConf.merge(cfg, {"reading": "plain"})
+        plain = _jsonl(os.path.join(dataset.config.result_dir, answers_file(pc)))
+        reuse = {k: plain[k] for k, (_, _, added) in jobs.items() if not added and k in plain}
+        if reuse:
+            with open(path, "a") as f:
+                for k, r in reuse.items():
+                    f.write(json.dumps(dict(r, reused_from="plain"), ensure_ascii=False) + "\n")
+            jobs = {k: x for k, x in jobs.items() if k not in reuse}
+            print(f"[answer/reading] {len(reuse)} answers without recovered pages reused from the plain prompt")
+    jobs = sorted(jobs.items(), key=lambda kv: (len(kv[1][1]), kv[0]))
+    print(f"[answer/reading {sorted(opts)}] {len(done)} cached, {len(jobs)} to run -> {os.path.basename(path)}")
+    if not jobs:
+        return
+    model = AnswerModel(cfg.models.answer)
+    assert model.backend == "vllm", "evidence-aware reading needs backend=vllm (token log-probabilities)"
+    store = PageStore(dataset.config.extract_path, cfg.recovery.get("mineru_dir"))
+    chars = cfg.get("text_chars", 1500)
+    n = chunk_size(cfg.models.answer)
+    with open(path, "a") as f:
+        for i in tqdm(range(0, len(jobs), n)):
+            batch = jobs[i:i + n]
+            msgs = []
+            for _, (s, sel, added) in batch:
+                q, _, im = dataset.load_sample_retrieval_data(s)
+                doc, cands = dataset.EXTRACT_DOCUMENT_ID(s), s["cands"]
+                reps = None
+                if opts & {"text", "text_all"}:
+                    reps = store.get(doc)[0]
+                text = (lambda j, r=reps, c=cands: "\n".join(b.text for b in r[c[j - 1]].blocks) if r else "")
+                msgs.append(reading.messages(model, q, im, sel, added, text, opts, chars))
+            images = prepare_images(msgs)
+            outs = model.llm.chat_many([to_openai_messages(m, images) for m in msgs], model.config.max_new_tokens,
+                                       extra=model.vllm_extra(), logprobs=1)
+            if any(o["error"] for o in outs):
+                raise RuntimeError(f"answer server error: {[o['error'] for o in outs if o['error']][0]}")
+            for (k, (s, sel, added)), o in zip(batch, outs):
+                f.write(json.dumps(dict(key=k, ids=sel, added=added, response=o["text"], prompt_tokens=o["prompt_tokens"],
+                                        completion_tokens=o["completion_tokens"], latency=o["latency"],
+                                        **reading.confidence(o.get("token_logprobs"), o["text"])),
+                                   ensure_ascii=False) + "\n")
+            f.flush()
+
+
 # ---------------------------------------------------------------------------- eval
 def extracted_answer(response):
     """The "Answer" field that MyModel.predict_dataset stores and eval_dataset judges."""
@@ -228,8 +305,11 @@ def eval_stage(cfg, dataset):
     path = os.path.join(rd, jc.get("out", "judge.jsonl"))   # one file per judge setting
     done = _jsonl(path)
     todo = {}
+    keep = set(jc.get("variants") or [])     # e.g. a second judge only for the main methods
     for s in rec:
-        for v in s["variants"].values():
+        for name, v in s["variants"].items():
+            if keep and name not in keep:
+                continue
             a = answers.get(answer_key(s, v["ids"]))
             if a is None:
                 continue

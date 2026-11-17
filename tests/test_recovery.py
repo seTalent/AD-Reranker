@@ -216,3 +216,45 @@ def test_logit_slot_probs_and_ten_split():
     q = split_first_digit({"1": lp(0.8), "3": lp(0.2)}, {"0": lp(0.25)}, 10)
     assert abs(q[10] - 0.2) < 1e-9 and abs(q[1] - 0.6) < 1e-9 and abs(q[3] - 0.2) < 1e-9
     assert set(split_first_digit({"1": 0.0}, None, 4)) == {1, 2, 3, 4}
+
+
+def test_reading_messages_tags_and_text():
+    from types import SimpleNamespace
+    from recovery.reading import messages, file_tag, parse
+    m = SimpleNamespace(system_prompt="SYS", user_message='Q: "{question}" reason: "{reason}"')
+    imgs = [f"p{i}.png" for i in range(1, 6)]
+    plain = messages(m, "q?", imgs, [2, 4], [4], lambda i: f"text {i}", set())
+    texts = [c["text"] for c in plain[1]["content"] if c["type"] == "text"]
+    assert texts == ['Q: "q?" reason: ""', "[2] :", "[4] :"]          # identical to AnswerModel's layout
+    tagged = messages(m, "q?", imgs, [2, 4], [4], lambda i: f"text {i}", {"tag", "text"})
+    texts = [c["text"] for c in tagged[1]["content"] if c["type"] == "text"]
+    assert "[4] (recovered page) :" in texts and "[2] :" in texts
+    assert "Pages [4] were not selected" in texts[0]
+    assert texts[-1] == "Text extracted from page [4]:\ntext 4" and not any("page [2]:" in t for t in texts)
+    every = messages(m, "q?", imgs, [2, 4], [], lambda i: f"text {i}", {"text_all"})
+    assert sum(t["text"].startswith("Text extracted") for t in every[1]["content"] if t["type"] == "text") == 2
+    assert file_tag("tag,text") == "ear-tag-text" and parse("") == set()
+
+
+def test_reading_confidence_answer_span():
+    from recovery.reading import confidence, answer_text, normalise
+    text = '{"Answer": "42", "reason": "page 3"}'
+    toks = [('{"', -0.1), ('Answer', -0.1), ('":', -0.1), (' "', -0.1), ('42', -2.0), ('",', -0.5),
+            (' "', -0.1), ('reason', -0.1), ('":', -0.1), (' "page', -0.3), (' 3', -0.3), ('"}', -0.1)]
+    c = confidence(toks, text)
+    assert c["n_ans"] == 3 and abs(c["conf_ans"] - (-0.1 - 2.0 - 0.5) / 3) < 1e-9 and c["conf_min"] == -2.0
+    assert answer_text(text) == "42" and normalise(" 1,000. ") == "1 000"
+
+
+def test_rule_scorer_formats():
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("jc", os.path.join(os.path.dirname(__file__), "..", "scripts", "rp2_judge_check.py"))
+    jc = importlib.util.module_from_spec(spec); spec.loader.exec_module(jc)
+    assert jc.rule_correct("8", "8", "Int") and jc.rule_correct("There are 8 people", "8", "Int")
+    assert not jc.rule_correct("9", "8", "Int")
+    assert jc.rule_correct("12.3%", "12.3", "Float") and jc.rule_correct("0.123", "12.3", "Float")
+    assert not jc.rule_correct("13.5", "12.3", "Float")
+    assert jc.rule_correct("Less well off", "Less well-off", "Str") and not jc.rule_correct("Poor", "Less well-off", "Str")
+    assert jc.rule_correct('["B", "A"]', "['A', 'B']", "List") and not jc.rule_correct('["A"]', "['A', 'B']", "List")
+    assert jc.rule_correct("Not answerable", "Not answerable", "None") and not jc.rule_correct("5", "Not answerable", "None")
+    assert abs(jc.kappa([1, 0, 1, 0], [1, 0, 1, 0]) - 1) < 1e-9
