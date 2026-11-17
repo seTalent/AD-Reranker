@@ -17,6 +17,10 @@ VAR='+variants=[rerank,score20@3,oracle@2]'
 J=(judge.prompt=adr judge.thinking=false judge.max_tokens=256 +judge.out=judge_adr.jsonl judge.concurrency=128 +judge.batch=2048
    '+judge.variants=[rerank,score20@3,oracle@2]')
 FROM=${FROM:-1}
+# READERS limits step 1 to some readers (one chain per reader can run in parallel); JUDGE=0 skips step 2;
+# WAIT_FOR="<log> ..." makes step 2 wait until every listed chain log says READERS_DONE.
+READERS=${READERS:-"qwen25vl7b:8101:vlm:30 qwen3vl8b:8105:reader3:45"}
+JUDGE=${JUDGE:-1}
 
 pick_gpu() {  # <GiB needed>
   while true; do
@@ -28,9 +32,10 @@ pick_gpu() {  # <GiB needed>
 }
 wait_up() { until curl -s -m 5 http://127.0.0.1:$1/v1/models | grep -q '"id"'; do
   grep -q -E "Traceback|CUDA out of memory" $2 && { echo "$(date) FAILED $2"; return 1; }; sleep 10; done; echo "$(date) up $1"; }
-serve() {  # <role> <port> <GiB> <util> <kv>
+serve() {  # <role> <port> <GiB> <util> <kv>; reuses a server that is already up on the port
+  curl -s -m 5 http://127.0.0.1:$2/v1/models | grep -q '"id"' && { echo "$(date) reusing server on $2"; return 0; }
   local g; g=$(pick_gpu $3); echo "$(date) starting $1 on GPU $g"
-  (cd $R/AD-Reranker && MODELS_DIR=/user_mount/home/zhukeyu/datasets/group-memory-pilot/models \
+  (cd $R/AD-Reranker && MAXLEN=${MAXLEN:-} MODELS_DIR=/user_mount/home/zhukeyu/datasets/group-memory-pilot/models \
      VLLM_BIN=/user_mount/home/zhukeyu/spd/envs/infer/bin/vllm MEDIA_ROOT=$R \
      setsid -f bash scripts/serve_vllm.sh $1 $g $4 $5 > $L/serve_${1}_reading.log 2>&1 < /dev/null)
   wait_up $2 $L/serve_${1}_reading.log
@@ -38,21 +43,24 @@ serve() {  # <role> <port> <GiB> <util> <kv>
 stop() { pkill -u "$USER" -f "served-model-name $1" && echo "$(date) $1 stopped"; sleep 20; }
 
 if [ $FROM -le 1 ]; then
-  for reader in qwen25vl7b:8101:vlm:30 qwen3vl8b:8105:reader3:45; do
+  for reader in $READERS; do
     IFS=: read -r NAME PORT ROLE GIB <<< "$reader"
-    serve $ROLE $PORT $GIB 0.3 12G || exit 1
+    MAXLEN=32768 serve $ROLE $PORT $GIB 0.3 12G || exit 1   # page text needs a longer context
     RD=(models.answer.all_pixels=1003520 models.answer.vllm_base_url=http://127.0.0.1:$PORT/v1 models.answer.vllm_model=$NAME)
     for run in $RUNS; do
       export CONFIG=${run%%:*} RUN_NAME=${run#*:}
       for mode in $MODES; do
         bash run_rp2_h200.sh answer +reading=$mode "$VAR" "${RD[@]}" > $L/reading_${RUN_NAME}_${NAME}_$mode.log 2>&1 \
-          || { echo "$(date) FAILED answer $RUN_NAME $NAME $mode"; exit 1; }
+          || { echo "$(date) FAILED answer $RUN_NAME $NAME $mode"; stop $NAME; exit 1; }
       done
       echo "$(date) $RUN_NAME $NAME answered"
     done
     stop $NAME
   done
+  echo "$(date) READERS_DONE"
 fi
+[ "$JUDGE" = 1 ] || exit 0
+for w in ${WAIT_FOR:-}; do until grep -q READERS_DONE $w; do grep -q FAILED $w && { echo "$(date) FAILED in $w"; exit 1; }; sleep 60; done; done
 
 serve judge 8103 70 0.5 8G || exit 1
 for run in $RUNS; do

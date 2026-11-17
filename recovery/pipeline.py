@@ -57,7 +57,10 @@ def _jsonl(path):
             for line in f:
                 line = line.strip()
                 if line:
-                    r = json.loads(line)
+                    try:
+                        r = json.loads(line)
+                    except json.JSONDecodeError:    # a line cut short by an interrupted run
+                        continue
                     if not r.get("error"):
                         rows[r["key"]] = r
     return rows
