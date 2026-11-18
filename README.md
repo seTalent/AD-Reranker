@@ -64,6 +64,19 @@ position bias did not help. Details: section 17 of the results doc;
 `python scripts/rp2_logit_analysis.py <run dir> --write first` writes the recover-stage signal file
 (`+recovery.resample_file=resample_logit_first.jsonl`).
 
+**Judge reliability.** Re-judging all answers with a cross-family judge (Gemma-3-27B) and with a
+rule scorer in the style of the MMLongBench scorer keeps every `score20@3` gain significant
+(Qwen–Gemma κ = 0.87–0.95). Section 18; `python scripts/rp2_judge_check.py <run dirs>`.
+
+**Evidence-aware reading.** With the recovered page lists held fixed (`+reading=tag|text|tag+text|text_all|plain`),
+labelling recovered pages hurts in all 8 settings, and page text helps only as a general reader
+aid (text on every page). The useful change is an answer-level fallback: answer with the reranked
+pages and with the recovered pages, and keep the recovered answer unless the reader is clearly
+less confident in it (δ chosen on dev). It costs no extra generation and fixes the
+"7B reader distracted by extra pages" case on LongDocURL (+2.1 → +3.1, +2.7 → +3.8; also significant with δ
+taken from MMLongBench dev). Elsewhere it rarely triggers. Sections 19–20;
+`python scripts/rp2_reading_analysis.py <run dirs>`.
+
 Full tables (baselines, ablations, top-4 vs top-10 pool, per-type breakdowns, latency):
 [docs/evidence_recovery_results.md](docs/evidence_recovery_results.md). Method and stage details:
 [docs/evidence_recovery.md](docs/evidence_recovery.md).

@@ -23,6 +23,9 @@ EXTRA=()
 [ -n "${EAGER:-}" ] && EXTRA+=(--enforce-eager)
 # LORA=name=path also serves a LoRA adapter (e.g. the trained AD-Reranker: LORA=adr=ckpt); request it by name
 [ -n "${LORA:-}" ] && EXTRA+=(--enable-lora --max-lora-rank 32 --lora-modules "$LORA")
+# NO_MM_CACHE=1 disables the multimodal preprocessing cache (vLLM 0.19 can lose a cached item after an aborted
+# client and then fail or hang requests with "Expected a cached item for mm_hash")
+[ -n "${NO_MM_CACHE:-}" ] && EXTRA+=(--mm-processor-cache-gb 0)
 case $ROLE in
   vlm)
     exec "$VLLM" serve "$MODELS/Qwen2.5-VL-7B-Instruct" --served-model-name qwen25vl7b --port 8101 \

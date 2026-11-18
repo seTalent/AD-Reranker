@@ -35,7 +35,7 @@ wait_up() { until curl -s -m 5 http://127.0.0.1:$1/v1/models | grep -q '"id"'; d
 serve() {  # <role> <port> <GiB> <util> <kv>; reuses a server that is already up on the port
   curl -s -m 5 http://127.0.0.1:$2/v1/models | grep -q '"id"' && { echo "$(date) reusing server on $2"; return 0; }
   local g; g=$(pick_gpu $3); echo "$(date) starting $1 on GPU $g"
-  (cd $R/AD-Reranker && MAXLEN=${MAXLEN:-} MODELS_DIR=/user_mount/home/zhukeyu/datasets/group-memory-pilot/models \
+  (cd $R/AD-Reranker && MAXLEN=${MAXLEN:-} NO_MM_CACHE=1 MODELS_DIR=/user_mount/home/zhukeyu/datasets/group-memory-pilot/models \
      VLLM_BIN=/user_mount/home/zhukeyu/spd/envs/infer/bin/vllm MEDIA_ROOT=$R \
      setsid -f bash scripts/serve_vllm.sh $1 $g $4 $5 > $L/serve_${1}_reading.log 2>&1 < /dev/null)
   wait_up $2 $L/serve_${1}_reading.log

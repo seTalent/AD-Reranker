@@ -9,6 +9,8 @@ For each run and reader:
      when both answers agree, otherwise keep A1 only if the reader is not much less confident in it:
      conf(A1) - conf(A0) >= delta, conf = mean token log-probability of the "Answer" value.
      delta is chosen on dev (grid), and test is reported with it; delta = -inf is "always A1".
+     The fallback is also paired against the method alone under the same prompt (McNemar), and the
+     distractor group's gain/loss vs. the plain rerank answer is shown after the fallback.
 
 usage: python scripts/rp2_reading_analysis.py results/MMLongBench/rp2-top10-mmlb-abl ... [--md out.md]
 """
@@ -85,8 +87,8 @@ def report(rd, reader, judge):
     dev = [r for r in rows if r["split"] == "dev"]
     test = [r for r in rows if r["split"] == "test"]
     out = [f"\n### {os.path.basename(rd.rstrip('/'))} / {reader}  (test {len(test)} questions; judge {judge})\n",
-           "| prompt | rerank | score20@3 (Δ vs plain rerank) | oracle@2 | gold-group gain/loss | distractor-group gain/loss | + fallback (δ from dev) | fallback rate |",
-           "|---|---|---|---|---|---|---|---|"]
+           "| prompt | rerank | score20@3 (Δ vs plain rerank) | oracle@2 | gold-group gain/loss | distractor-group gain/loss | + fallback (δ from dev) | fallback vs score20@3: gain/loss | distractor group after fallback | fallback rate |",
+           "|---|---|---|---|---|---|---|---|---|---|"]
     res = {}
     for m in MODES:
         if not any((m, METHOD) in r for r in test):
@@ -106,12 +108,22 @@ def report(rd, reader, judge):
         base = [r[("plain", "rerank")]["ok"] for r, x in zip(test, fb) if x is not None]
         b = sum(x[0] and not y for x, y in zip([x for x in fb if x is not None], base))
         c = sum(y and not x[0] for x, y in zip([x for x in fb if x is not None], base))
+        # fallback against the method alone (same prompt): what the fallback itself changes
+        pairs = [(x[0], r[(m, METHOD)]["ok"], r["group"]) for r, x in zip(test, fb) if x is not None and (m, METHOD) in r]
+        fb_b = sum(f and not o for f, o, _ in pairs)
+        fb_c = sum(o and not f for f, o, _ in pairs)
+        fb_p = mcnemar(fb_b, fb_c)
+        dis = [(x[0], r[("plain", "rerank")]["ok"]) for r, x in zip(test, fb)
+               if x is not None and r["group"] == "distractor" and ("plain", "rerank") in r]
+        dis_gl = f"{sum(f and not o for f, o in dis)}/{sum(o and not f for f, o in dis)}"
         star = "*" if p < 0.05 else ""
         fstar = "*" if mcnemar(b, c) < 0.05 else ""
         out.append(f"| {m} | {a_r:.1f} | {a_m:.1f} ({d:+.1f}{star}) | {a_o:.1f} | {grp['gold']} | {grp['distractor']} | "
-                   f"{fa:.1f} ({100 * (b - c) / max(1, len(base)):+.1f}{fstar}, δ={best:g}) | {rate:.1f}% |")
+                   f"{fa:.1f} ({100 * (b - c) / max(1, len(base)):+.1f}{fstar}, δ={best:g}) | "
+                   f"{fb_b}/{fb_c}{'*' if fb_p < 0.05 else ''} (p={fb_p:.3f}) | {dis_gl} | {rate:.1f}% |")
         res[m] = dict(rerank=a_r, method=a_m, oracle=a_o, delta=d, p=p, groups=grp, fallback=fa, fallback_delta=best,
-                      fallback_rate=rate, fallback_gain=100 * (b - c) / max(1, len(base)), fallback_p=mcnemar(b, c), n=n)
+                      fallback_rate=rate, fallback_gain=100 * (b - c) / max(1, len(base)), fallback_p=mcnemar(b, c), n=n,
+                      fallback_vs_method=dict(gain=fb_b, loss=fb_c, p=fb_p), distractor_after_fallback=dis_gl)
     return "\n".join(out), res
 
 
