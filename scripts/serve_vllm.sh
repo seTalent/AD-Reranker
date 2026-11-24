@@ -5,7 +5,7 @@
 # verifier : Qwen3.5-9B, text-only evidence-recovery verifier
 # judge    : Qwen3.5-27B, MMLongBench-Doc-V2 judge prompt
 # judge_gemma: gemma-3-27b-it, cross-family check of the judge
-# MAXLEN=n overrides the context length of the vlm / reader3 readers (e.g. 32768 when page text is added).
+# MAXLEN=n overrides the context length of the vlm / reader3 / reader32 readers (e.g. 32768 when page text is added).
 # On shared GPUs pass kv_cache_bytes (e.g. 20G): vLLM's profiler otherwise attributes other
 # users' concurrent allocations to this process.
 set -euo pipefail
@@ -55,7 +55,7 @@ case $ROLE in
       --allowed-local-media-path "$MEDIA_ROOT" --seed 0 "${EXTRA[@]}" ;;
   reader32)  # larger reader of the same family (port 8106, models.answer.vllm_model=qwen25vl32b)
     exec "$VLLM" serve "$MODELS/Qwen2.5-VL-32B-Instruct" --served-model-name qwen25vl32b --port 8106 \
-      --dtype bfloat16 --max-model-len 20480 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --dtype bfloat16 --max-model-len ${MAXLEN:-20480} --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 12, "video": 0}' \
       --allowed-local-media-path "$MEDIA_ROOT" --seed 0 "${EXTRA[@]}" ;;
   judge_gemma)   # cross-family judge, text only (judge.base_url=http://127.0.0.1:8107/v1 judge.model=gemma3-27b)

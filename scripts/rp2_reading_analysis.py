@@ -25,7 +25,8 @@ from recovery.pipeline import _jsonl, answer_key, gold_pages, judge_key, skey   
 from recovery.reading import answer_text, normalise   # noqa: E402
 
 MODES = ["plain", "tag", "text", "tag-text", "text_all"]
-READERS = {"qwen25vl7b": "answers_px1003520_ear-{m}.jsonl", "qwen3vl8b": "answers_qwen3vl8b_px1003520_ear-{m}.jsonl"}
+READERS = {"qwen25vl7b": "answers_px1003520_ear-{m}.jsonl", "qwen3vl8b": "answers_qwen3vl8b_px1003520_ear-{m}.jsonl",
+           "qwen25vl32b": "answers_qwen25vl32b_px1003520_ear-{m}.jsonl"}
 METHOD = "score20@3"
 GRID = [-9.0, -2.0, -1.5, -1.0, -0.75, -0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.5, 1.0]
 

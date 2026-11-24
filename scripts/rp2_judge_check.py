@@ -20,7 +20,9 @@ from recovery.analysis import doc_split, mcnemar   # noqa: E402
 from recovery.pipeline import _jsonl, answer_key, extracted_answer, judge_key, skey   # noqa: E402
 
 VARIANTS = ["rerank", "ret@2", "scoreni20@3", "score20@3", "score20+f50@3", "oracle@2", "top10"]
-READERS = {"qwen25vl7b": "answers_px1003520.jsonl", "qwen3vl8b": "answers_qwen3vl8b_px1003520.jsonl"}
+READERS = {"qwen25vl7b": "answers_px1003520.jsonl", "qwen3vl8b": "answers_qwen3vl8b_px1003520.jsonl",
+           # the 32B reader was only run through the reading stage; its plain prompt covers the main variants
+           "qwen25vl32b": "answers_qwen25vl32b_px1003520_ear-plain.jsonl"}
 
 
 # ----------------------------------------------------------------------------- rule-based scorer
