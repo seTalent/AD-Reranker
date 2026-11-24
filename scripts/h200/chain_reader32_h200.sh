@@ -13,6 +13,9 @@ MAIN='+variants=[rerank,top10,ret@2,oracle@2,scoreni20@3,score20@3]'
 VAR='+variants=[rerank,score20@3,oracle@2]'
 MODES="plain tag text tag+text text_all"
 FROM=${FROM:-1}
+ARUNS=${ARUNS:-$RUNS}     # step 1 only (e.g. resume after a crash; answers already written are reused)
+KV32=${KV32:-40G}         # smaller on shared GPUs: another job can grab memory while the server runs
+N32=${N32:-2}             # GPUs for the 32B reader (data parallel); 1 when the machine is busy
 RD=(models.answer.all_pixels=1003520 models.answer.vllm_model=$NAME)
 MDIR=/user_mount/home/zhukeyu/datasets/group-memory-pilot/models
 VBIN=/user_mount/home/zhukeyu/spd/envs/infer/bin/vllm
@@ -39,14 +42,20 @@ serve() {  # <role> <port> <n gpus> <GiB each> <util> <kv> [env...]
 stop() { pkill -u "$USER" -f "served-model-name $1" && echo "$(date) $1 stopped"; sleep 20; }
 
 if [ $FROM -le 1 ]; then
-  serve reader32 8106 2 110 0.85 40G MAXLEN=32768 NO_MM_CACHE=1 || exit 1
+  up32() { serve reader32 8106 $N32 100 0.85 $KV32 MAXLEN=32768 NO_MM_CACHE=1; }
+  up32 || exit 1
   A=("${RD[@]}" models.answer.vllm_base_url=http://127.0.0.1:8106/v1)
-  for run in $RUNS; do
+  for run in $ARUNS; do
     export CONFIG=${run%%:*} RUN_NAME=${run#*:}
     for mode in $MODES; do
       V=$VAR; [ $mode = plain ] && V=$MAIN
-      bash run_rp2_h200.sh answer +reading=$mode "$V" "${A[@]}" > $L/r32_${RUN_NAME}_$mode.log 2>&1 \
-        || { echo "$(date) FAILED answer $RUN_NAME $mode"; stop $NAME; exit 1; }
+      # a server crash (e.g. OOM when another job takes memory on the GPU) is retried: restart, reuse cached answers
+      for try in 1 2 3 4; do
+        [ $try = 4 ] && { echo "$(date) FAILED answer $RUN_NAME $mode"; stop $NAME; exit 1; }
+        bash run_rp2_h200.sh answer +reading=$mode "$V" "${A[@]}" >> $L/r32_${RUN_NAME}_$mode.log 2>&1 && break
+        echo "$(date) answer $RUN_NAME $mode failed (try $try), restarting the server"
+        pkill -u "$USER" -f "served-model-name $NAME"; sleep 60; up32 || exit 1
+      done
     done
     echo "$(date) $RUN_NAME $NAME answered"
   done

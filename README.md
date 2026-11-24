@@ -74,8 +74,16 @@ aid (text on every page). The useful change is an answer-level fallback: answer 
 pages and with the recovered pages, and keep the recovered answer unless the reader is clearly
 less confident in it (δ chosen on dev). It costs no extra generation and fixes the
 "7B reader distracted by extra pages" case on LongDocURL (+2.1 → +3.1, +2.7 → +3.8; also significant with δ
-taken from MMLongBench dev). Elsewhere it rarely triggers. Sections 19–20;
-`python scripts/rp2_reading_analysis.py <run dirs>`.
+taken from MMLongBench dev). Elsewhere it rarely triggers. Re-judged with Gemma, the prompt results hold.
+The fallback goes the same way, but with the plain prompt its per-cell significance depends on the judge
+and on how δ is chosen. Sections 19–20; `python scripts/rp2_reading_analysis.py <run dirs>`.
+
+**Stronger reader (Qwen2.5-VL-32B).** Recovery gains hold (+3.5 to +6.1, significant under both judges in all
+4 settings). On LongDocURL the share of the oracle gain recovered rises from about 50% (7B) to 74–78%.
+Gold-added questions that stay wrong are almost never answered by the oracle page set either (2.6–10.6% across
+the three readers), so most of the remaining errors are not the recovery stage's. With 32B, labelling recovered
+pages no longer hurts. Page text on every page adds a significant +2.7 / +2.9 on LongDocURL, and the fallback
+matters less. Section 21; `scripts/h200/chain_reader32_h200.sh`.
 
 Full tables (baselines, ablations, top-4 vs top-10 pool, per-type breakdowns, latency):
 [docs/evidence_recovery_results.md](docs/evidence_recovery_results.md). Method and stage details:
