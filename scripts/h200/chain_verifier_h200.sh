@@ -14,10 +14,13 @@ L=$R/logs
 cd $R
 RUNS="mmlb:rp2-top10-mmlb-abl mmlb:rp2-top10-mmlb-adr ldu:rp2-top10-ldu ldu:rp2-top10-ldu-adr"
 #      tag        role               port model            pixels  GiB
-VERS="qwen9b_lr:verifier_mm_lr:8111:qwen35-9b-mm-lr:262144:45
+VERS=${VERS:-"qwen9b_lr:verifier_mm_lr:8111:qwen35-9b-mm-lr:262144:45
 qwen27b:verifier_mm27:8110:qwen35-27b-mm:602112:90
 internvl8b:verifier_internvl:8108:internvl35-8b:null:45
-gemma12b:verifier_gemma:8109:gemma3-12b:null:55"
+gemma12b:verifier_gemma:8109:gemma3-12b:null:55"}
+# InternVL3.5-8B-HF returns meaningless text under vLLM 0.19 (also text-only); it is replaced by
+#   VERS="qwen3vl8b:verifier_qwen3vl:8113:qwen3vl8b-ver:602112:45"   (results doc section 24)
+# WAIT_READ="<log>..." makes steps 3-4 (readers, judge: shared names / ports) wait for those chains' *_DONE line.
 TAGS=$(echo "$VERS" | cut -d: -f1 | paste -sd,)
 FROM=${FROM:-1}
 MDIR=/user_mount/home/zhukeyu/datasets/group-memory-pilot/models
@@ -65,6 +68,7 @@ if [ $FROM -le 1 ]; then
     echo "$(date) $tag verified"
   done || exit 1
   # the default verifier's latency in the same probe (it already has its verification)
+  [ "${SKIP_DEFAULT_PROBE:-0}" = 1 ] || {
   g=$(pick_gpu 45)
   serve_on $g verifier_mm 8104 0.5 16G NO_MM_CACHE=1 || exit 1
   for run in mmlb:rp2-top10-mmlb-abl ldu:rp2-top10-ldu; do
@@ -73,6 +77,7 @@ if [ $FROM -le 1 ]; then
       > $L/ver_probe_${RUN_NAME}_qwen9b.log 2>&1 || echo "$(date) FAILED probe $RUN_NAME qwen9b"
   done
   stop qwen35-9b-mm
+  }
   echo "$(date) VERIFIED"
 fi
 
@@ -98,6 +103,7 @@ LIST=$(echo "$VERS" | while IFS=: read -r tag rest; do
   t=$(echo "$TAU" | $PY -c "import json,sys; print(round(100*json.load(sys.stdin)['$tag']))")
   echo "\"score20@3:$tag\""; [ "$t" != 20 ] && echo "\"score$t@3:$tag\""; done | paste -sd,)
 echo "$(date) variants [$LIST]"
+for w in ${WAIT_READ:-}; do until grep -q -E "_DONE" $w; do sleep 120; done; done
 if [ $FROM -le 3 ]; then
   g=$(pick_gpu 80)
   serve_on $g vlm 8101 0.2 12G NO_MM_CACHE=1 || exit 1

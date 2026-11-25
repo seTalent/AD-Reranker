@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local model servers (vLLM, OpenAI-compatible) for backend=vllm, the recovery verifier and the judge.
-#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|verifier_mm_lr|verifier_mm27|verifier_internvl|verifier_gemma|judge|judge_gemma|reader3|reader32|mmr5 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
+#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|verifier_mm_lr|verifier_mm27|verifier_qwen3vl|verifier_internvl|verifier_gemma|judge|judge_gemma|reader3|reader32|mmr5 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
 # vlm      : Qwen2.5-VL-7B-Instruct for refiner + answer model (512 visual tokens per page, as all_pixels)
 # verifier : Qwen3.5-9B, text-only evidence-recovery verifier
 # judge    : Qwen3.5-27B, MMLongBench-Doc-V2 judge prompt
@@ -71,7 +71,12 @@ case $ROLE in
       --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
       --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
-  verifier_internvl)   # other-family verifier, 256 tokens per page (one 448 x 448 tile)
+  verifier_qwen3vl)   # Qwen3-VL-8B as the verifier (another model generation; pixels set per request)
+    exec "$VLLM" serve "$MODELS/Qwen3-VL-8B-Instruct" --served-model-name qwen3vl8b-ver --port 8113 \
+      --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
+      --seed 0 "${EXTRA[@]}" ;;
+  verifier_internvl)   # NOTE: this checkpoint returns meaningless text under vLLM 0.19 (also for text-only prompts)   # other-family verifier, 256 tokens per page (one 448 x 448 tile)
     exec "$VLLM" serve "$MODELS/InternVL3_5-8B-HF" --served-model-name internvl35-8b --port 8108 \
       --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
