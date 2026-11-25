@@ -10,6 +10,7 @@ that leaves the page list unchanged reuses the same answer.
 """
 import hashlib
 import json
+import shutil
 import os
 import time
 from collections import defaultdict
@@ -133,18 +134,33 @@ def recover_stage(cfg, dataset):
         rf = cfg.recovery.get("resample_file", "resample_n6_t0.7.jsonl")
         samples = _jsonl(os.path.join(dataset.config.result_dir, "recovery_cache", rf))
         print(f"[recover] selection frequencies from {rf}: {len(samples)} questions")
+    # recovery.extend=true adds the plan's variants to an existing recover.json (kept as recover.json.bak once)
+    # instead of rebuilding it, e.g. cheaper verifier budgets score20m4@3 from the cached verification
+    extend = bool(cfg.recovery.get("extend"))
+    prev = {}
+    if extend:
+        rp = os.path.join(dataset.config.result_dir, "recover.json")
+        prev = {r["job_key"] + "|" + skey(r): r for r in json.load(open(rp))}
+        if not os.path.exists(rp + ".bak"):
+            shutil.copy(rp, rp + ".bak")
     out = []
     for s, k in zip(rer, keys):
         ctx, cands = ctxs[k], s["cands"]
         gold = gold_pages(s)
         variants = {"top4": dict(ids=list(range(1, min(4, len(cands)) + 1)), added=[]),
                     "top10": dict(ids=list(range(1, len(cands) + 1)), added=[])}
+        if extend:
+            variants = dict(prev[k + "|" + skey(s)]["variants"])
         sv = {mode: ver[mode].get(k) for mode in modes}
         if skey(s) in samples:
             sv["freq"] = {cands[int(i) - 1]: x for i, x in samples[skey(s)]["freq"].items() if int(i) <= len(cands)}
         for m, b in plan:
+            if extend and m == "none":
+                continue
             pages, added = rec.select(m, b, ctx, sv, gold)
-            variants["rerank" if m == "none" else f"{m}@{b}"] = dict(
+            # recovery.verifier_tag names the verifier model: score20@3:internvl8b (with recovery.extend=true)
+            vtag = cfg.recovery.get("verifier_tag") if mode_of(m) else None
+            variants["rerank" if m == "none" else f"{m}@{b}" + (f":{vtag}" if vtag else "")] = dict(
                 ids=[cands.index(p) + 1 for p in pages], added=[cands.index(p) + 1 for p in added])
         strongest = {}
         for d in ctx["dropped"]:

@@ -31,6 +31,9 @@ def main(cfg):
     elif stage == "probe":
         from recovery.probe import probe
         probe(cfg, dataset)
+    elif stage == "probe_v2":
+        from recovery.probe import probe_v2
+        probe_v2(cfg, dataset)
     elif stage == "sense":
         from recovery.sensitivity import sense_stage
         sense_stage(cfg, dataset, cfg.get("split"))

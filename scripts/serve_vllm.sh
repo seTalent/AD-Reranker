@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local model servers (vLLM, OpenAI-compatible) for backend=vllm, the recovery verifier and the judge.
-#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|judge|judge_gemma|reader3|reader32 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
+#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|verifier_mm_lr|verifier_mm27|verifier_internvl|verifier_gemma|judge|judge_gemma|reader3|reader32 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
 # vlm      : Qwen2.5-VL-7B-Instruct for refiner + answer model (512 visual tokens per page, as all_pixels)
 # verifier : Qwen3.5-9B, text-only evidence-recovery verifier
 # judge    : Qwen3.5-27B, MMLongBench-Doc-V2 judge prompt
@@ -26,6 +26,8 @@ EXTRA=()
 # NO_MM_CACHE=1 disables the multimodal preprocessing cache (vLLM 0.19 can lose a cached item after an aborted
 # client and then fail or hang requests with "Expected a cached item for mm_hash")
 [ -n "${NO_MM_CACHE:-}" ] && EXTRA+=(--mm-processor-cache-gb 0)
+# NO_PREFIX=1 disables automatic prefix caching (latency probes: every request pays its full prefill)
+[ -n "${NO_PREFIX:-}" ] && EXTRA+=(--no-enable-prefix-caching)
 case $ROLE in
   vlm)
     exec "$VLLM" serve "$MODELS/Qwen2.5-VL-7B-Instruct" --served-model-name qwen25vl7b --port 8101 \
@@ -58,6 +60,26 @@ case $ROLE in
       --dtype bfloat16 --max-model-len ${MAXLEN:-20480} --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 12, "video": 0}' \
       --allowed-local-media-path "$MEDIA_ROOT" --seed 0 "${EXTRA[@]}" ;;
+  verifier_mm_lr)   # the default verifier on its own port, for the 256-tokens-per-page run (pixels set per request)
+    exec "$VLLM" serve "$MODELS/Qwen3.5-9B" --served-model-name qwen35-9b-mm-lr --port 8111 \
+      --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
+      --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
+  verifier_mm27)   # larger verifier of the same family (recovery.verifier_mm.base_url=http://127.0.0.1:8110/v1)
+    exec "$VLLM" serve "$MODELS/Qwen3.5-27B" --served-model-name qwen35-27b-mm --port 8110 \
+      --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
+      --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
+  verifier_internvl)   # other-family verifier, 256 tokens per page (one 448 x 448 tile)
+    exec "$VLLM" serve "$MODELS/InternVL3_5-8B-HF" --served-model-name internvl35-8b --port 8108 \
+      --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
+      --seed 0 "${EXTRA[@]}" ;;
+  verifier_gemma)   # other-family verifier, 256 tokens per page (896 x 896)
+    exec "$VLLM" serve "$MODELS/gemma-3-12b-it" --served-model-name gemma3-12b --port 8109 \
+      --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 16}' --allowed-local-media-path "$MEDIA_ROOT" \
+      --seed 0 "${EXTRA[@]}" ;;
   judge_gemma)   # cross-family judge, text only (judge.base_url=http://127.0.0.1:8107/v1 judge.model=gemma3-27b)
     exec "$VLLM" serve "$MODELS/gemma-3-27b-it" --served-model-name gemma3-27b --port 8107 \
       --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$UTIL" --max-num-seqs 128 \

@@ -47,8 +47,16 @@ def split_score(method):
     """'scorenr30' -> ('score_norel', 0.30); None for other methods.
     'scoreni20+f50' also restores pages that >= 50% of the reranker's samples select (recovery/resample.py)."""
     import re
-    m = re.fullmatch(r"(score(?:nk|nr|ni)?)(\d+)(?:\+f\d+)?", method)
+    m = re.fullmatch(r"(score(?:nk|nr|ni)?)(\d+)(?:m\d+)?(?:\+f\d+)?", method)
     return (SCORE_MODES[m.group(1)], int(m.group(2)) / 100) if m else None
+
+
+def split_limit(method):
+    """'score20m4' -> 4: only the 4 best-retrieved dropped pages are verified (a cheaper verifier budget);
+    None verifies every dropped page."""
+    import re
+    m = re.fullmatch(r"score(?:nk|nr|ni)?\d+m(\d+)(?:\+f\d+)?", method.removesuffix("_tail"))
+    return int(m.group(1)) if m else None
 
 
 def split_freq(method):
@@ -143,7 +151,8 @@ class EvidenceRecovery:
 
     # ------------------------------------------------------------ verification (cached)
     def _cache(self, mode):
-        path = os.path.join(self.cache_dir, f"verify_{mode}.jsonl")
+        tag = self.cfg.get("verifier_tag")      # another verifier model keeps its own cache
+        path = os.path.join(self.cache_dir, f"verify_{mode}" + (f"_{tag}" if tag else "") + ".jsonl")
         rows = {}
         if os.path.exists(path):
             with open(path) as f:
@@ -181,14 +190,17 @@ class EvidenceRecovery:
                                              gap=mode != "score_nokept", images=mode != "score_noimg"))
                 owners.append((key, c, ctx["t_graph"]))
         if reqs:
-            outs = self.llm_mm.chat_many(reqs, 1, thinking=False, logprobs=10,
-                                         extra={"mm_processor_kwargs": {"min_pixels": vm.pixels, "max_pixels": vm.pixels}})
+            # pixels: Qwen-style fixed resolution per page; null keeps the model's own image processor
+            # (e.g. Gemma-3 / InternVL3.5 at 256 tokens per page)
+            extra = {"mm_processor_kwargs": {"min_pixels": vm.pixels, "max_pixels": vm.pixels}} if vm.get("pixels") else None
+            outs = self.llm_mm.chat_many(reqs, 1, thinking=False, logprobs=10, extra=extra)
             per = {}
             for (key, c, tg), o in zip(owners, outs):
                 r = per.setdefault(key, dict(key=key, mode=mode, skipped=False, scores={}, prompt_tokens=0,
                                              completion_tokens=0, latency=0.0, t_graph=tg, error=None))
                 p = V.yes_probability(o.get("first_token_logprobs"))
                 r["scores"][str(c)] = p if p is not None else 0.0
+                r["n_unparsed"] = r.get("n_unparsed", 0) + (p is None)    # neither Yes nor No among the top tokens
                 r["prompt_tokens"] += o["prompt_tokens"]
                 r["completion_tokens"] += o["completion_tokens"]
                 r["latency"] = max(r["latency"], o["latency"])
@@ -273,6 +285,10 @@ class EvidenceRecovery:
             mode, t = split_score(method)
             v = ver.get(mode)
             sc = {} if not v or v.get("skipped") else {int(p): s for p, s in v["scores"].items()}
+            lim = split_limit(method)
+            if lim is not None:     # dropped pages are in retrieval order
+                allowed = set(dropped[:lim])
+                sc = {p: x for p, x in sc.items() if p in allowed}
             f = split_freq(method)
             if f is None:
                 R = [p for p in sorted(sc, key=lambda p: (-sc[p], ctx["rank"][p])) if sc[p] >= t][:b]

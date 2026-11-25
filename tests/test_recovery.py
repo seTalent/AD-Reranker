@@ -129,6 +129,12 @@ def test_yes_probability_and_score_selection():
     assert er.select("score50", 2, ctx, ver)[1] == [2, 7]
     assert er.select("score80", 2, ctx, ver)[1] == [2]
     assert er.select("score20", 1, ctx, ver) == ([1, 2], [2])
+    # verifier budget: only the m best-retrieved dropped pages (4, then 2) are checked
+    from recovery import split_limit
+    assert split_limit("score20m2") == 2 and split_limit("score20") is None and mode_of("score20m2") == "score_mm"
+    assert er.select("score20m1", 3, ctx, ver)[1] == [4]
+    assert er.select("score20m2", 3, ctx, ver)[1] == [2, 4]
+    assert er.select("score50m2", 3, ctx, ver)[1] == [2]
 
 
 def test_selection_frequency_union():
