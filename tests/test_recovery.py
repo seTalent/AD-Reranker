@@ -290,3 +290,12 @@ def test_rule_scorer_formats():
     assert jc.rule_correct('["B", "A"]', "['A', 'B']", "List") and not jc.rule_correct('["A"]', "['A', 'B']", "List")
     assert jc.rule_correct("Not answerable", "Not answerable", "None") and not jc.rule_correct("5", "Not answerable", "None")
     assert abs(jc.kappa([1, 0, 1, 0], [1, 0, 1, 0]) - 1) < 1e-9
+
+
+def test_mmr5_ranking_parser():
+    from recovery.mmr5 import messages, parse
+    assert parse("<think>x</think><answer>[3, 1, 3, 12]</answer>", 4) == ([3, 1, 2, 4], True)
+    assert parse("no answer", 3) == ([1, 2, 3], False)
+    m = messages("q?", ["a.png", "b.png"])
+    assert [c["type"] for c in m[1]["content"]] == ["text", "text", "image", "text", "image"]
+

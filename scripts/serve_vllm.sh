@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local model servers (vLLM, OpenAI-compatible) for backend=vllm, the recovery verifier and the judge.
-#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|verifier_mm_lr|verifier_mm27|verifier_internvl|verifier_gemma|judge|judge_gemma|reader3|reader32 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
+#   bash scripts/serve_vllm.sh vlm|verifier|verifier_mm|verifier_mm_lr|verifier_mm27|verifier_internvl|verifier_gemma|judge|judge_gemma|reader3|reader32|mmr5 <gpu> [gpu_memory_utilization] [kv_cache_bytes]
 # vlm      : Qwen2.5-VL-7B-Instruct for refiner + answer model (512 visual tokens per page, as all_pixels)
 # verifier : Qwen3.5-9B, text-only evidence-recovery verifier
 # judge    : Qwen3.5-27B, MMLongBench-Doc-V2 judge prompt
@@ -81,6 +81,10 @@ case $ROLE in
       --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 16}' --allowed-local-media-path "$MEDIA_ROOT" \
       --seed 0 "${EXTRA[@]}" ;;
+  mmr5)   # MM-R5 reasoning reranker (Qwen2.5-VL-7B), recovery/mmr5.py; pixels set per request
+    exec "$VLLM" serve "$MODELS/MM-R5" --served-model-name mmr5 --port 8112 \
+      --dtype bfloat16 --max-model-len 16384 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
+      --limit-mm-per-prompt '{"image": 12}' --allowed-local-media-path "$MEDIA_ROOT" --seed 0 "${EXTRA[@]}" ;;
   judge_gemma)   # cross-family judge, text only (judge.base_url=http://127.0.0.1:8107/v1 judge.model=gemma3-27b)
     exec "$VLLM" serve "$MODELS/gemma-3-27b-it" --served-model-name gemma3-27b --port 8107 \
       --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization "$UTIL" --max-num-seqs 128 \

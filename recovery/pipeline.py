@@ -82,6 +82,30 @@ def rerank_stage(cfg, dataset):
     done = {skey(s): s for s in json.load(open(path))} if os.path.exists(path) else {}
     todo = [s for s in samples if skey(s) not in done]
     print(f"[rerank] {len(samples)} samples, {len(done)} cached, {len(todo)} to run")
+    if todo and cfg.models.refiner.get("ranker") == "mmr5":     # MM-R5 ranking, keep the first k
+        from models.local_llm import LocalLLM, prepare_images, to_openai_messages
+        from recovery import mmr5
+        rc, k = cfg.models.refiner, int(cfg.models.refiner.get("keep_k", 2))
+        llm = LocalLLM(rc.vllm_base_url, rc.vllm_model, rc.get("vllm_concurrency", 32))
+        extra = {"mm_processor_kwargs": {"min_pixels": rc.all_pixels, "max_pixels": rc.all_pixels}}   # greedy
+        n = chunk_size(rc)
+        for i in tqdm(range(0, len(todo), n)):
+            batch = todo[i:i + n]
+            msgs = [mmr5.messages(*[dataset.load_sample_retrieval_data(s)[j] for j in (0, 2)]) for s in batch]
+            imgs = prepare_images(msgs)
+            t0 = time.time()
+            outs = llm.chat_many([to_openai_messages(m, imgs) for m in msgs], int(rc.get("mmr5_max_tokens", 4096)), extra=extra)
+            dt = (time.time() - t0) / len(batch)
+            for s, o in zip(batch, outs):
+                if o["error"]:
+                    raise RuntimeError(f"MM-R5 server error: {o['error']}")
+                s["cands"] = list(s[dataset.config.r_image_key][: dataset.config.top_k])
+                order, ok = mmr5.parse(o["text"], len(s["cands"]))
+                s.update(refiner_ids=order[:k], mmr5_order=order, refiner_output=o["text"], refiner_fallback=not ok,
+                         refiner_sec=dt)
+                done[skey(s)] = s
+            _dump(path, [done[skey(s)] for s in samples if skey(s) in done])
+        todo = []
     if todo:
         refiner = RefinerModel(cfg.models.refiner)
         n = chunk_size(cfg.models.refiner)
