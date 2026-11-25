@@ -5,7 +5,8 @@
 #   step 2: Qwen3.5-27B judge on those answers
 #   step 3: latency probe (+stage=probe_v2): sequential per-component wall time on 100 test questions and seconds per
 #           question at throughput on 300, both datasets x both rerankers, readers 7B / 8B / 32B. Prefix caching and the
-#           multimodal preprocessing cache are off, so every request pays its full cost.
+#           multimodal preprocessing cache are off for the reranker and readers (every request pays its full cost);
+#           the verifiers keep prefix caching, which the shared-prefix check is designed for.
 # One GPU at a time; servers are stopped after each step.
 set -uo pipefail
 R=/user_mount/home/zhukeyu/datasets/thesis-evidence-recovery
@@ -35,7 +36,7 @@ serve_on() {  # <gpu> <role> <port> <util> <kv> [env...]
      setsid -f bash scripts/serve_vllm.sh $role $g $util $kv > $L/serve_${role}_cost.log 2>&1 < /dev/null)
   wait_up $port $L/serve_${role}_cost.log
 }
-stop() { for n in "$@"; do pkill -u "$USER" -f "served-model-name $n" && echo "$(date) $n stopped"; done; sleep 20; }
+stop() { for n in "$@"; do pkill -u "$USER" -f "served-model-name $n( |$)" && echo "$(date) $n stopped"; done; sleep 20; }
 
 if [ $FROM -le 1 ]; then
   g=$(pick_gpu 80)
@@ -68,11 +69,22 @@ if [ $FROM -le 2 ]; then
 fi
 if [ $FROM -le 3 ]; then
   P=(NO_PREFIX=1 NO_MM_CACHE=1)
-  g=$(pick_gpu 110)
-  serve_on $g vlm 8101 0.15 8G "${P[@]}" LORA=adr=$R/AD-Reranker/ckpt || exit 1
-  serve_on $g verifier_mm 8104 0.2 8G "${P[@]}" || { stop qwen25vl7b; exit 1; }
-  serve_on $g verifier 8102 0.2 8G "${P[@]}" || { stop qwen25vl7b qwen35-9b-mm; exit 1; }
-  serve_on $g reader3 8105 0.2 8G "${P[@]}" || { stop qwen25vl7b qwen35-9b-mm qwen35-9b; exit 1; }
+  # Qwen3.5 can fail to compile when it starts on a GPU that already serves another model: each GPU starts with
+  # its Qwen3.5 verifier, and a verifier that still fails is retried without torch.compile / CUDA graphs (EAGER=1,
+  # logged, slower). The verifiers keep prefix caching: the checks of one question share the question +
+  # selected-pages prefix by design.
+  serve_v() {  # <gpu> <role> <port> <name>
+    # util 0.2 / 8G KV fails during start-up for Qwen3.5 in vLLM 0.19; 0.5 / 16G (as in the verifier runs) works
+    serve_on $1 $2 $3 0.5 16G NO_MM_CACHE=1 && return 0
+    stop $4; echo "$(date) $2 retried with EAGER=1"
+    serve_on $1 $2 $3 0.5 16G NO_MM_CACHE=1 EAGER=1
+  }
+  g1=$(pick_gpu 100)
+  serve_v $g1 verifier_mm 8104 qwen35-9b-mm || exit 1
+  serve_on $g1 vlm 8101 0.15 8G "${P[@]}" LORA=adr=$R/AD-Reranker/ckpt || { stop qwen35-9b-mm; exit 1; }
+  sleep 30; g2=$(pick_gpu 100)
+  serve_v $g2 verifier 8102 qwen35-9b || { stop qwen35-9b-mm qwen25vl7b; exit 1; }
+  serve_on $g2 reader3 8105 0.2 8G "${P[@]}" || { stop qwen35-9b-mm qwen25vl7b qwen35-9b; exit 1; }
   for run in $RUNS; do
     export CONFIG=${run%%:*} RUN_NAME=${run#*:}
     RF=(); [[ $RUN_NAME == *adr ]] && RF=(models.refiner.vllm_model=adr)

@@ -110,7 +110,7 @@ def parse_plan(entry):
 
 
 def recover_stage(cfg, dataset):
-    from recovery import EvidenceRecovery, job_key, mode_of, split_freq
+    from recovery import EvidenceRecovery, job_key, mode_of, modes_of, split_freq
     from recovery.graph import links
     rer = json.load(open(os.path.join(dataset.config.result_dir, "rerank.json")))
     rec = EvidenceRecovery(cfg.recovery, dataset.config.extract_path,
@@ -123,7 +123,7 @@ def recover_stage(cfg, dataset):
         k = job_key(s["doc_id"], s["question"], cands, kept)
         ctxs[k] = rec.context(dataset.EXTRACT_DOCUMENT_ID(s), s[dataset.config.question_key], cands, kept)
         keys.append(k)
-    modes = sorted({mode_of(m) for m, _ in plan if mode_of(m)})
+    modes = sorted(set().union(*[modes_of(m) for m, _ in plan]))
     ver = {}
     for mode in modes:
         t0 = time.time()
@@ -138,14 +138,22 @@ def recover_stage(cfg, dataset):
     # instead of rebuilding it, e.g. cheaper verifier budgets score20m4@3 from the cached verification
     extend = bool(cfg.recovery.get("extend"))
     prev = {}
-    if extend:
+    lock = None
+    if extend:      # two chains may extend the same run: hold a lock from reading recover.json to writing it
+        import fcntl
         rp = os.path.join(dataset.config.result_dir, "recover.json")
+        lock = open(rp + ".lock", "w")
+        fcntl.flock(lock, fcntl.LOCK_EX)
         prev = {r["job_key"] + "|" + skey(r): r for r in json.load(open(rp))}
         if not os.path.exists(rp + ".bak"):
             shutil.copy(rp, rp + ".bak")
     out = []
     for s, k in zip(rer, keys):
         ctx, cands = ctxs[k], s["cands"]
+        sc = s.get("image-top-10-question_score")
+        if isinstance(sc, str):
+            sc = json.loads(sc)
+        ctx["ret_score"] = {p: float(x) for p, x in zip(cands, sc or [])}    # retrieval scores, for rsNN / mmrN
         gold = gold_pages(s)
         variants = {"top4": dict(ids=list(range(1, min(4, len(cands)) + 1)), added=[]),
                     "top10": dict(ids=list(range(1, len(cands) + 1)), added=[])}
@@ -159,7 +167,7 @@ def recover_stage(cfg, dataset):
                 continue
             pages, added = rec.select(m, b, ctx, sv, gold)
             # recovery.verifier_tag names the verifier model: score20@3:internvl8b (with recovery.extend=true)
-            vtag = cfg.recovery.get("verifier_tag") if mode_of(m) else None
+            vtag = cfg.recovery.get("verifier_tag") if modes_of(m) else None
             variants["rerank" if m == "none" else f"{m}@{b}" + (f":{vtag}" if vtag else "")] = dict(
                 ids=[cands.index(p) + 1 for p in pages], added=[cands.index(p) + 1 for p in added])
         strongest = {}
@@ -170,6 +178,8 @@ def recover_stage(cfg, dataset):
                         located=[cands.index(p) + 1 for p in ctx["located"]], dropped_relation=strongest,
                         t_graph=ctx["t_graph"]))
     _dump(os.path.join(dataset.config.result_dir, "recover.json"), out)
+    if lock:
+        lock.close()
     print(f"[recover] {len(out)} samples x {len(out[0]['variants'])} variants")
     return out
 

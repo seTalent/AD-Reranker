@@ -5,6 +5,7 @@
 # verifier : Qwen3.5-9B, text-only evidence-recovery verifier
 # judge    : Qwen3.5-27B, MMLongBench-Doc-V2 judge prompt
 # judge_gemma: gemma-3-27b-it, cross-family check of the judge
+# SNAME / PORT rename the verifier_mm / verifier_mm27 servers (a second copy next to a running chain).
 # MAXLEN=n overrides the context length of the vlm / reader3 / reader32 readers (e.g. 32768 when page text is added).
 # On shared GPUs pass kv_cache_bytes (e.g. 20G): vLLM's profiler otherwise attributes other
 # users' concurrent allocations to this process.
@@ -41,7 +42,7 @@ case $ROLE in
       --limit-mm-per-prompt '{"image": 0, "video": 0}' --reasoning-parser qwen3 \
       --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
   verifier_mm)
-    exec "$VLLM" serve "$MODELS/Qwen3.5-9B" --served-model-name qwen35-9b-mm --port 8104 \
+    exec "$VLLM" serve "$MODELS/Qwen3.5-9B" --served-model-name ${SNAME:-qwen35-9b-mm} --port ${PORT:-8104} \
       --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
       --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
@@ -66,7 +67,7 @@ case $ROLE in
       --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
       --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;
   verifier_mm27)   # larger verifier of the same family (recovery.verifier_mm.base_url=http://127.0.0.1:8110/v1)
-    exec "$VLLM" serve "$MODELS/Qwen3.5-27B" --served-model-name qwen35-27b-mm --port 8110 \
+    exec "$VLLM" serve "$MODELS/Qwen3.5-27B" --served-model-name ${SNAME:-qwen35-27b-mm} --port ${PORT:-8110} \
       --dtype bfloat16 --max-model-len 32768 --gpu-memory-utilization "$UTIL" --max-num-seqs 64 \
       --limit-mm-per-prompt '{"image": 16, "video": 0}' --allowed-local-media-path "$MEDIA_ROOT" \
       --reasoning-parser qwen3 --gdn-prefill-backend triton --seed 0 "${EXTRA[@]}" ;;

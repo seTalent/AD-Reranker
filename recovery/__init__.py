@@ -66,11 +66,47 @@ def split_freq(method):
     return int(m.group(1)) / 100 if m else None
 
 
+def split_filter(method):
+    """'filter30' -> 0.30: single-pass filtering without a reranker. Every Top-k candidate gets the plain
+    relevance check (the w/o-gap prompt, mode score_all) and pages with P(Yes) >= 0.30 are read."""
+    import re
+    m = re.fullmatch(r"filter(\d+)", method)
+    return int(m.group(1)) / 100 if m else None
+
+
+def split_baseline(method):
+    """Baselines from related work, in the recovery slot (results doc section 27):
+      'suff50'  CRAG-style: one sufficiency check of the kept pages; if P(insufficient) >= 0.50, add the top-b
+                dropped pages by retrieval rank
+      'gate50'  the same check as a gate: run the gap-conditioned page scoring (score20) only when insufficient
+      'mmr7'    MMR: add b dropped pages maximising 0.7 * retrieval relevance - 0.3 * max text similarity
+                to the pages already selected
+      'rs70'    retrieval-score threshold: add dropped pages whose min-max normalised retrieval score >= 0.70
+    -> (kind, parameter) or None."""
+    import re
+    m = re.fullmatch(r"(suff|gate|mmr|rs)(\d+)", method)
+    if not m:
+        return None
+    k, x = m.group(1), int(m.group(2))
+    return k, (x / 10 if k == "mmr" else x / 100)
+
+
+def modes_of(method):
+    """Every verification mode a method needs."""
+    b = split_baseline(method)
+    if b:
+        return {"suff", "score_mm"} if b[0] == "gate" else ({"suff"} if b[0] == "suff" else set())
+    m = mode_of(method)
+    return {m} if m else set()
+
+
 def mode_of(method):
     """Verification mode a method needs (None for heuristics). scoreNN = gap-conditioned page
     scoring with threshold NN/100; scorenk/scorenr/scoreni = without selected pages / relation
     hints / page images. A "_tail" suffix appends restored pages instead of inserting them."""
     method = method.removesuffix("_tail")
+    if split_filter(method) is not None:
+        return "score_all"
     s = split_score(method)
     return s[0] if s else VERIFY_MODE.get(method)
 
@@ -107,6 +143,20 @@ def insert(kept, recovered, edges, tail=False):
     for k in kept:
         out += sorted(before.get(k, [])) + [k] + sorted(after.get(k, []))
     return out + sorted(loose)
+
+
+def _tf(rep):
+    import re
+    from collections import Counter
+    return Counter(re.findall(r"[a-z0-9]+", " ".join(b.text for b in rep.blocks).lower()))
+
+
+def _cos(a, b):
+    import math
+    if not a or not b:
+        return 0.0
+    dot = sum(v * b.get(k, 0) for k, v in a.items())
+    return dot / (math.sqrt(sum(v * v for v in a.values())) * math.sqrt(sum(v * v for v in b.values())))
 
 
 def job_key(doc_id, question, cands, kept):
@@ -175,19 +225,21 @@ class EvidenceRecovery:
             if key in done:
                 continue
             kept, pool = ctx["kept"], list(ctx["dropped"])
-            if not pool or not kept:
+            if mode == "score_all":              # single-pass filter: every candidate, no selected pages
+                kept, pool = [], list(ctx["cands"])
+            if not pool or (not kept and mode != "score_all"):
                 done[key] = dict(key=key, mode=mode, skipped=True, scores={}, prompt_tokens=0, completion_tokens=0,
                                  latency=0.0, t_graph=ctx["t_graph"], error=None)
                 new.append(done[key])
                 continue
             texts = {p: self._plain(ctx["reps"][p], self.cfg.get("score_chars", 2500)) for p in kept + pool}
             for c in pool:
-                rels = None if mode == "score_norel" else [
+                rels = None if mode in ("score_norel", "score_all") else [
                     f"- {NAMES[r.kind]} with S{kept.index(r.v if r.u == c else r.u) + 1} ({r.detail})"
                     for r in links(ctx["edges"], c, set(kept))]
                 reqs.append(V.messages_score(ctx["question"], kept, c, texts, rels,
                                              lambda p, d=ctx["doc"]: self.image_url(d, p),
-                                             gap=mode != "score_nokept", images=mode != "score_noimg"))
+                                             gap=mode not in ("score_nokept", "score_all"), images=mode != "score_noimg"))
                 owners.append((key, c, ctx["t_graph"]))
         if reqs:
             # pixels: Qwen-style fixed resolution per page; null keeps the model's own image processor
@@ -214,8 +266,42 @@ class EvidenceRecovery:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         return done
 
+    def sufficiency(self, items):
+        """One CRAG-style check per question: P(Yes) that the kept pages suffice (scores["suff"])."""
+        path, done = self._cache("suff")
+        vm, new, reqs, owners = self.cfg.verifier_mm, [], [], []
+        for key, ctx in items.items():
+            if key in done:
+                continue
+            kept = ctx["kept"]
+            if not kept or not ctx["dropped"]:
+                done[key] = dict(key=key, mode="suff", skipped=True, scores={}, prompt_tokens=0, completion_tokens=0,
+                                 latency=0.0, t_graph=ctx["t_graph"], error=None)
+                new.append(done[key])
+                continue
+            texts = {p: self._plain(ctx["reps"][p], self.cfg.get("score_chars", 2500)) for p in kept}
+            reqs.append(V.messages_sufficiency(ctx["question"], kept, texts, lambda p, d=ctx["doc"]: self.image_url(d, p)))
+            owners.append((key, ctx["t_graph"]))
+        if reqs:
+            extra = {"mm_processor_kwargs": {"min_pixels": vm.pixels, "max_pixels": vm.pixels}} if vm.get("pixels") else None
+            outs = self.llm_mm.chat_many(reqs, 1, thinking=False, logprobs=10, extra=extra)
+            for (key, tg), o in zip(owners, outs):
+                p = V.yes_probability(o.get("first_token_logprobs"))
+                r = dict(key=key, mode="suff", skipped=False, scores={"suff": 1.0 if p is None else p},
+                         n_unparsed=int(p is None), prompt_tokens=o["prompt_tokens"], completion_tokens=o["completion_tokens"],
+                         latency=o["latency"], t_graph=tg, error=o["error"])
+                new.append(r)
+                if not r["error"]:
+                    done[key] = r
+        with open(path, "a") as f:
+            for rec in new:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return done
+
     def verify(self, items, mode):
         """items: {key: ctx}. Returns {key: record} for verification `mode`."""
+        if mode == "suff":
+            return self.sufficiency(items)
         if mode.startswith("score_"):
             return self.score(items, mode)
         path, done = self._cache(mode)
@@ -270,6 +356,46 @@ class EvidenceRecovery:
         kept, dropped, edges = ctx["kept"], ctx["dropped"], ctx["edges"]
         if method == "none":
             return list(kept), []
+        bl = split_baseline(method)
+        if bl is not None:
+            kind, x = bl
+            if kind in ("suff", "gate"):
+                v = ver.get("suff")
+                insufficient = bool(v) and not v.get("skipped") and 1.0 - v["scores"]["suff"] >= x
+                if not insufficient:
+                    R = []
+                elif kind == "suff":
+                    R = dropped[:b]
+                else:
+                    return self.select(f"score20", b, ctx, ver, gold)
+            elif kind == "rs":
+                rs = ctx.get("ret_score") or {}
+                lo, hi = min(rs.values(), default=0.0), max(rs.values(), default=0.0)
+                norm = {p: (rs[p] - lo) / (hi - lo) if hi > lo else 1.0 for p in rs}
+                R = sorted([p for p in dropped if norm.get(p, 0.0) >= x], key=lambda p: ctx["rank"][p])[:b]
+            else:                                # MMR over page texts
+                rs = ctx.get("ret_score") or {}
+                lo, hi = min(rs.values(), default=0.0), max(rs.values(), default=0.0)
+                rel = {p: (rs[p] - lo) / (hi - lo) if hi > lo else 1.0 for p in dropped}
+                vec = {p: _tf(ctx["reps"][p]) for p in list(kept) + list(dropped)}
+                R, chosen = [], list(kept)
+                while len(R) < b and len(R) < len(dropped):
+                    best = max((p for p in dropped if p not in R), key=lambda p: (
+                        x * rel.get(p, 0.0) - (1 - x) * max((_cos(vec[p], vec[q]) for q in chosen), default=0.0),
+                        -ctx["rank"][p]))
+                    R.append(best)
+                    chosen.append(best)
+            return insert(kept, R, edges, tail=tail), R
+        t = split_filter(method)
+        if t is not None:                        # no reranker: pages are read in retrieval order
+            v = ver.get("score_all")
+            sc = {} if not v or v.get("skipped") else {int(p): x for p, x in v["scores"].items()}
+            cands = ctx["cands"]
+            R = [p for p in cands if sc.get(p, 0.0) >= t]
+            if b and len(R) > b:
+                R = sorted(sorted(R, key=lambda p: (-sc[p], ctx["rank"][p]))[:b], key=lambda p: ctx["rank"][p])
+            R = R or cands[:1]                   # nothing passes: the top retrieved page, as the reranker's fallback
+            return R, [p for p in R if p not in set(kept)]
         if method == "ret":
             R = dropped[:b]
         elif method == "adj":

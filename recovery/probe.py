@@ -52,8 +52,8 @@ def probe_v2(cfg, dataset):
       page representation + relation graph, multimodal / text-only gap-conditioned verification
       (all dropped pages of the question sent together, as in the pipeline), and reading the page set of
       every method in `probe_variants`.
-    batch (`probe_batch_n`, default 300): the same components over the whole subset at the clients'
-      usual concurrency (32 requests in flight) -> seconds per question at throughput.
+    batch (`probe_batch_n`, default 300, other questions than the sequential ones): the same components at the
+      clients' usual concurrency (32 requests in flight) -> seconds per question at throughput.
     Verification uses fresh cache keys, so nothing comes from the recovery cache. `probe_parts` limits the
     components (e.g. [read] for a second reader); `probe_tag` names the output files."""
     import statistics as st
@@ -68,8 +68,9 @@ def probe_v2(cfg, dataset):
     rec = [s for s in json.load(open(os.path.join(rd, "recover.json"))) if doc_split(s["doc_id"]) == "test"]
     rec = list({skey(s): s for s in rec}.values())
     rng = random.Random(0)
-    pool = rng.sample(rec, min(int(cfg.get("probe_batch_n", 300)), len(rec)))
-    seq = pool[:int(cfg.get("probe_n", 100))]
+    n_seq, n_bat = int(cfg.get("probe_n", 100)), int(cfg.get("probe_batch_n", 300))
+    drawn = rng.sample(rec, min(n_seq + n_bat, len(rec)))
+    seq, pool = drawn[:n_seq], drawn[n_seq:]   # disjoint: the batch run cannot reuse the sequential run's prefixes
     refiner = RefinerModel(cfg.models.refiner) if {"rerank", "sample"} & set(parts) else None
     reader = AnswerModel(cfg.models.answer) if "read" in parts else None
     er = EvidenceRecovery(cfg.recovery, dataset.config.extract_path, os.path.join(rd, "probe_cache"))

@@ -292,3 +292,20 @@ def rel_ranking(raw, cand_ids):
         if m and m.group(1) in cand_ids and cand_ids[m.group(1)] not in ranked:
             ranked.append(cand_ids[m.group(1)])
     return ranked
+
+
+SUFF_SYSTEM = "You check whether the pages selected for a question are enough to answer it."
+SUFF_ASK = ("Do the SELECTED pages contain all the information needed to answer the question? "
+            "Answer with one word: Yes or No.")
+
+
+def messages_sufficiency(question, kept, texts, image_of):
+    """CRAG-style sufficiency check of the selected pages (one call per question, results doc section 27)."""
+    content = [{"type": "text", "text": f"Question: {question}\n\nSELECTED PAGES:"}]
+    for i, p in enumerate(kept, 1):
+        content += ([{"type": "text", "text": f'<page id="S{i}" physical_page="{p + 1}">'},
+                     {"type": "image_url", "image_url": {"url": image_of(p)}},
+                     {"type": "text", "text": f"Extracted text:\n{texts[p]}\n</page>"}])
+    content.append({"type": "text", "text": "\n" + SUFF_ASK})
+    return [{"role": "system", "content": SUFF_SYSTEM}, {"role": "user", "content": content}]
+

@@ -135,6 +135,32 @@ def test_yes_probability_and_score_selection():
     assert er.select("score20m1", 3, ctx, ver)[1] == [4]
     assert er.select("score20m2", 3, ctx, ver)[1] == [2, 4]
     assert er.select("score50m2", 3, ctx, ver)[1] == [2]
+    # single-pass filter over every candidate (no reranker), retrieval order, top page if nothing passes
+    from recovery import split_filter
+    assert split_filter("filter30") == 0.3 and mode_of("filter30") == "score_all" and split_filter("score30") is None
+    fctx = dict(ctx, cands=[1, 4, 2, 7])
+    fver = {"score_all": {"skipped": False, "scores": {"1": 0.1, "4": 0.6, "2": 0.9, "7": 0.4}}}
+    assert er.select("filter30", 10, fctx, fver) == ([4, 2, 7], [4, 2, 7])
+    assert er.select("filter30", 2, fctx, fver)[0] == [4, 2]
+    assert er.select("filter95", 10, fctx, fver)[0] == [1]
+    # related-work baselines in the recovery slot
+    from recovery import modes_of, split_baseline
+    from recovery.pagerep import Block, PageRep
+    assert split_baseline("suff50") == ("suff", 0.5) and split_baseline("mmr7") == ("mmr", 0.7)
+    assert modes_of("gate50") == {"suff", "score_mm"} and modes_of("rs70") == set() and modes_of("score20") == {"score_mm"}
+    bctx = dict(ctx, ret_score={1: 10.0, 4: 9.0, 2: 6.0, 7: 9.5})
+    insuff = dict(ver, suff={"skipped": False, "scores": {"suff": 0.2}})
+    enough = dict(ver, suff={"skipped": False, "scores": {"suff": 0.9}})
+    assert er.select("suff50", 2, bctx, insuff)[1] == [4, 2] and er.select("suff50", 2, bctx, enough)[1] == []
+    assert er.select("gate50", 1, bctx, insuff)[1] == [2] and er.select("gate50", 1, bctx, enough)[1] == []
+    assert er.select("rs70", 3, bctx, ver)[1] == [4, 7]          # (9 - 6) / 4 = 0.75, (9.5 - 6) / 4 = 0.875
+    def rep(t):
+        r = PageRep.__new__(PageRep)
+        r.blocks = [Block.__new__(Block)]
+        r.blocks[0].text = t
+        return r
+    bctx["reps"] = {1: rep("revenue table 2020"), 4: rep("revenue table 2020"), 7: rep("staff count by region"), 2: rep("x")}
+    assert er.select("mmr5", 1, bctx, ver)[1] == [7]              # 4 is as relevant but repeats the kept page
 
 
 def test_selection_frequency_union():
